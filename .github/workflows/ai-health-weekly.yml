@@ -1,0 +1,135 @@
+name: AI Health Weekly Research Radar
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Wednesday 09:00 Asia/Shanghai (GitHub cron uses UTC).
+    - cron: "0 1 * * 3"
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: "检索最近多少天的论文"
+        required: false
+        default: "8"
+      clear_cache:
+        description: "是否清空历史缓存后重新生成"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: ai-health-weekly
+  cancel-in-progress: false
+
+jobs:
+  collect-digest-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Restore paper data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .paper-cache
+          key: ai-health-paper-data-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ai-health-paper-data-
+
+      - name: Hydrate cached paper data
+        run: |
+          mkdir -p web/data
+          if [ -f .paper-cache/papers.json ]; then
+            cp .paper-cache/papers.json web/data/papers.json
+          fi
+
+      - name: Collect and analyze papers
+        env:
+          LOOKBACK_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.lookback_days || vars.LOOKBACK_DAYS || '8' }}
+          MAX_PER_TOPIC: ${{ vars.MAX_PER_TOPIC || '20' }}
+          MAX_SUMMARIES: ${{ vars.MAX_SUMMARIES || '30' }}
+          MAX_NEW_PAPERS: ${{ vars.MAX_NEW_PAPERS || '100' }}
+          MAX_STORED_PAPERS: ${{ vars.MAX_STORED_PAPERS || '300' }}
+          MAX_DATA_BYTES: ${{ vars.MAX_DATA_BYTES || '8388608' }}
+          RECENT_HISTORY_DAYS: ${{ vars.RECENT_HISTORY_DAYS || '60' }}
+          SOURCE_DELAY_SECONDS: ${{ vars.SOURCE_DELAY_SECONDS || '3' }}
+          ARXIV_DELAY_SECONDS: ${{ vars.ARXIV_DELAY_SECONDS || '15' }}
+          ARXIV_RETRY_THROTTLED: "true"
+          ARXIV_RETRIES: "3"
+          ARXIV_RETRY_MIN_SECONDS: "30"
+          ARXIV_RETRY_BASE_SECONDS: "30"
+          ARXIV_RETRY_MAX_SECONDS: "90"
+          ARXIV_QUERY_MODE: ${{ vars.ARXIV_QUERY_MODE || 'keyword' }}
+          ARXIV_SORT_BY: ${{ vars.ARXIV_SORT_BY || 'lastUpdatedDate' }}
+          CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL || '' }}
+          MIN_DAILY_PAPERS: "0"
+          CLEAR_PAPER_CACHE: ${{ github.event_name == 'workflow_dispatch' && inputs.clear_cache || vars.CLEAR_PAPER_CACHE || 'false' }}
+          INCREMENTAL_SINCE_LAST_RUN: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
+          LLM_CONCURRENCY: ${{ vars.LLM_CONCURRENCY || '2' }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL || secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || secrets.LLM_MODEL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: python scripts/collect_papers.py
+
+      - name: Generate Obsidian weekly digest
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          DIGEST_LOOKBACK_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.lookback_days || vars.LOOKBACK_DAYS || '8' }}
+          DIGEST_MAX_PAPERS: ${{ vars.DIGEST_MAX_PAPERS || '12' }}
+        run: python scripts/generate_weekly_digest.py --lookback-days "$DIGEST_LOOKBACK_DAYS" --max-papers "$DIGEST_MAX_PAPERS"
+
+      - name: Commit Obsidian digest
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add obsidian/
+          if ! git diff --cached --quiet; then
+            git commit -m "docs: add weekly AI health research digest"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
+      - name: Stage paper cache
+        run: |
+          mkdir -p .paper-cache
+          cp web/data/papers.json .paper-cache/papers.json
+
+      - name: Save paper data cache
+        uses: actions/cache/save@v4
+        with:
+          path: .paper-cache
+          key: ai-health-paper-data-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

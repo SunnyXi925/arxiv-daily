@@ -1,0 +1,14 @@
+{
+  "generated_at": "",
+  "generated_at_iso": "",
+  "config_source": "file",
+  "data_kind": "daily",
+  "topics": [],
+  "papers": [],
+  "stats": {
+    "paper_count": 0,
+    "new_paper_count": 0,
+    "collection_mode": "initial",
+    "llm_enabled": false
+  }
+}

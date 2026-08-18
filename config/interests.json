@@ -1,0 +1,150 @@
+{
+  "sources": [
+    { "type": "arxiv", "name": "arXiv" }
+  ],
+  "conference_sources": {
+    "enabled": false,
+    "venues": []
+  },
+  "topics": [
+    {
+      "id": "ai_for_nutrition",
+      "name": "AI for Nutrition 与个性化营养",
+      "description": "关注人工智能驱动的个性化营养、膳食推荐、食物识别、营养评估、营养基因组学、代谢组学与精准健康干预。",
+      "keywords": [
+        "AI for nutrition",
+        "personalized nutrition",
+        "precision nutrition",
+        "diet recommendation",
+        "meal recommendation",
+        "food recommendation",
+        "dietary assessment",
+        "food recognition",
+        "nutrigenomics",
+        "nutrition knowledge graph",
+        "metabolic health"
+      ],
+      "arxiv_categories": ["cs.AI", "cs.LG", "cs.IR", "cs.CV", "q-bio.QM", "q-bio.GN"],
+      "alphaxiv_tags": ["AI For Health", "Recommender Systems", "Multi Modal Learning", "Computer Vision", "AI For Genomics"]
+    },
+    {
+      "id": "health_management",
+      "name": "健康管理与体检后管理",
+      "description": "关注体检后风险分层、慢病预防、生活方式干预、患者旅程、可穿戴设备、远程监测与长期健康管理。",
+      "keywords": [
+        "health management",
+        "post-examination management",
+        "preventive health",
+        "health risk stratification",
+        "lifestyle intervention",
+        "chronic disease management",
+        "remote patient monitoring",
+        "digital health intervention",
+        "wearable health",
+        "patient trajectory",
+        "longitudinal health record"
+      ],
+      "arxiv_categories": ["cs.AI", "cs.LG", "cs.HC", "cs.CY", "stat.ML", "eess.SP"],
+      "alphaxiv_tags": ["AI For Health", "Time Series Analysis", "Human AI Interaction", "Uncertainty Estimation", "Tabular ML"]
+    },
+    {
+      "id": "health_agents",
+      "name": "医疗健康 Agentic AI 与多智能体",
+      "description": "关注健康场景中的自主智能体、多智能体协作、工具调用、任务规划、临床推理验证与安全的人机协同工作流。",
+      "keywords": [
+        "healthcare agent",
+        "medical agent",
+        "clinical agent",
+        "agentic AI healthcare",
+        "multi-agent healthcare",
+        "medical multi-agent system",
+        "tool-using medical LLM",
+        "clinical workflow agent",
+        "medical reasoning verification",
+        "autonomous health assistant",
+        "LLM health coach"
+      ],
+      "arxiv_categories": ["cs.AI", "cs.CL", "cs.MA", "cs.HC", "cs.LG"],
+      "alphaxiv_tags": ["Agents", "Agentic Frameworks", "Multi Agent Learning", "Tool Use", "Reasoning", "Reasoning Verification", "Conversational AI"]
+    },
+    {
+      "id": "digital_health_twins",
+      "name": "健康数字孪生与虚拟患者",
+      "description": "关注患者数字孪生、虚拟患者、个体生理建模、疾病进展模拟、干预反事实评估与个性化决策支持。",
+      "keywords": [
+        "digital health twin",
+        "patient digital twin",
+        "human digital twin",
+        "clinical digital twin",
+        "virtual patient",
+        "computational patient",
+        "physiological digital twin",
+        "personalized simulation",
+        "disease progression simulation",
+        "in silico patient",
+        "counterfactual treatment simulation"
+      ],
+      "arxiv_categories": ["cs.AI", "cs.LG", "q-bio.QM", "q-bio.NC", "eess.SY", "stat.ML"],
+      "alphaxiv_tags": ["AI For Health", "Generative Models", "Causal Inference", "Time Series Analysis", "Probabilistic Programming"]
+    },
+    {
+      "id": "health_world_models",
+      "name": "健康应用中的世界模型",
+      "description": "关注学习患者状态转移、疾病演化和干预响应的世界模型、潜在动力学、模型式强化学习与长期规划。",
+      "keywords": [
+        "world model healthcare",
+        "world model medicine",
+        "patient world model",
+        "latent dynamics health",
+        "model-based reinforcement learning healthcare",
+        "disease dynamics model",
+        "patient state transition",
+        "longitudinal patient simulation",
+        "treatment planning world model",
+        "clinical trajectory forecasting"
+      ],
+      "arxiv_categories": ["cs.AI", "cs.LG", "cs.CL", "stat.ML", "q-bio.QM"],
+      "alphaxiv_tags": ["Reasoning", "Generative Models", "Deep Reinforcement Learning", "Sequence Modeling", "Time Series Analysis", "Test Time Inference"]
+    },
+    {
+      "id": "functional_precision_health",
+      "name": "功能医学与系统精准健康",
+      "description": "关注多组学、生物标志物、知识图谱、因果推断和系统医学在功能医学、精准预防与个体化干预中的应用。",
+      "keywords": [
+        "functional medicine AI",
+        "systems medicine",
+        "precision health",
+        "multi-omics health",
+        "biomarker discovery AI",
+        "health knowledge graph",
+        "causal inference healthcare",
+        "personalized intervention",
+        "metabolomics machine learning",
+        "microbiome machine learning",
+        "integrative medicine AI"
+      ],
+      "arxiv_categories": ["cs.AI", "cs.LG", "cs.DB", "q-bio.GN", "q-bio.QM", "stat.ML"],
+      "alphaxiv_tags": ["AI For Health", "AI For Genomics", "Graph Neural Networks", "Causal Inference", "Multi Modal Learning", "Explainable AI"]
+    },
+    {
+      "id": "trustworthy_multimodal_health_ai",
+      "name": "可信多模态健康 AI",
+      "description": "关注融合 EHR、医学文本、检验、影像、可穿戴时序和组学数据的多模态模型，以及可解释性、不确定性、隐私和跨域泛化。",
+      "keywords": [
+        "multimodal healthcare AI",
+        "multimodal medical foundation model",
+        "electronic health record foundation model",
+        "clinical time series",
+        "medical vision language model",
+        "explainable healthcare AI",
+        "uncertainty estimation healthcare",
+        "federated learning healthcare",
+        "privacy preserving medical AI",
+        "domain adaptation medical AI",
+        "synthetic health data"
+      ],
+      "arxiv_categories": ["cs.AI", "cs.LG", "cs.CL", "cs.CV", "stat.ML", "eess.IV"],
+      "alphaxiv_tags": ["AI For Health", "Multi Modal Learning", "Vision Language Models", "Time Series Analysis", "Explainable AI", "Uncertainty Estimation", "Federated Learning", "Privacy Preserving ML", "Synthetic Data"]
+    }
+  ]
+}
