@@ -39,15 +39,43 @@ alphaXiv 用作论文阅读、讨论和趋势跟踪入口；标题、作者、�
 2. 在 `Settings -> Secrets and variables -> Actions` 中添加模型配置。
 3. 打开 `Actions -> AI Health Weekly Research Radar`，执行一次 `Run workflow` 完成初始化。
 
-推荐配置一个 OpenAI-compatible 模型。没有密钥时仍会抓取论文并生成基础周报，但主要创新点和四类研究价值只能提供待复核提示。
+默认使用中国科技云 OpenAI-compatible 接口：
+
+```text
+https://uni-api.cstcloud.cn/v1
+```
+
+默认模型为 `deepseek-v4-flash`。没有密钥时仍会抓取论文并生成基础周报，但主要创新点和四类研究价值只能提供待复核提示。
 
 | 类型 | 名称 | 示例 |
 | --- | --- | --- |
-| Secret | `LLM_API_KEY` | 模型服务 API Key |
-| Variable | `LLM_BASE_URL` | `https://api.openai.com/v1` |
-| Variable | `LLM_MODEL` | 支持 JSON 输出的模型名 |
+| Secret | `LLM_API_KEY` | 中国科技云 API Key |
+| Variable | `LLM_MODEL` | 可选；覆盖默认的 `deepseek-v4-flash` |
 
-也可以只配置 `OPENAI_API_KEY` 使用 OpenAI 默认接口，或只配置 `DEEPSEEK_API_KEY` 使用 DeepSeek 默认接口。自定义服务建议同时配置三个 `LLM_*` 值。
+API Key 在[中国科技云大模型 API 页面](https://uni-api.cstcloud.cn/api_keys)申请。不要把 Key 写入仓库、Issue、配置文件或聊天消息。
+
+### 安全添加 API Key
+
+网页方式：
+
+1. 打开仓库 `Settings -> Secrets and variables -> Actions`。
+2. 进入 `Secrets`，点击 `New repository secret`。
+3. `Name` 填写 `LLM_API_KEY`。
+4. `Secret` 粘贴中国科技云 API Key，然后保存。
+
+命令行方式（推荐，Key 不会出现在命令参数中）：
+
+```bash
+gh secret set LLM_API_KEY --repo SunnyXi925/arxiv-daily
+```
+
+命令提示输入时粘贴 Key 并回车。设置后可运行以下命令确认 Secret 名称已经存在；GitHub 不会回显密钥内容：
+
+```bash
+gh secret list --repo SunnyXi925/arxiv-daily
+```
+
+若账号未开通默认模型，可在 `Variables` 中新增 `LLM_MODEL`，值填写中国科技云 `/v1/models` 返回的可用模型 ID。
 
 常用可选变量：
 
