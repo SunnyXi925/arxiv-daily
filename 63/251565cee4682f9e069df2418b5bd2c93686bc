@@ -1,0 +1,29 @@
+.github/workflows/ai-health-weekly.yml
+  s_edd0bf87669dbe::t_9e9ca78a259733 85,87-89,97-123
+scripts/collect_papers.py
+  s_edd0bf87669dbe::t_9e9ca78a259733 1743-1770,1782,1794-1842,2406-2411,2416-2425,2430,2443-2445,2505,2507
+  s_edd0bf87669dbe::t_1df1a9f2fbd1ea 119-126,2379-2404,2506
+tests/test_collect_papers.py
+  s_edd0bf87669dbe::t_e9ba79a1163619 942-998
+  s_edd0bf87669dbe::t_1df1a9f2fbd1ea 478-481,487
+  s_edd0bf87669dbe::t_814b47b8fd7bf8 18,85-86,526-572
+  s_edd0bf87669dbe::t_001c5e430ab04a 573
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.50",
+  "base_commit_sha": "63251565cee4682f9e069df2418b5bd2c93686bc",
+  "prompts": {},
+  "sessions": {
+    "s_edd0bf87669dbe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f65ad-87d4-7500-a991-ce7f280c2228",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "fengxi.25 <fengxi.25@jd.com>",
+      "total_additions": 1,
+      "accepted_lines": 1
+    }
+  }
+}
