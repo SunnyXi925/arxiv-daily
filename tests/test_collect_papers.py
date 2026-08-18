@@ -11,6 +11,7 @@ from scripts.collect_papers import (
     ConferenceSource,
     arxiv_query_for_topic,
     arxiv_retry_wait_seconds,
+    call_openai_compatible,
     cached_conference_years,
     collect,
     collection_cutoff,
@@ -72,6 +73,12 @@ class RetentionTest(unittest.TestCase):
         os.environ.pop("CUSTOM_FEED_BEARER_TOKEN", None)
         os.environ.pop("LLM_SUMMARIZE_CONFERENCE", None)
         os.environ.pop("LLM_SUMMARIZE_TITLE_ONLY", None)
+        os.environ.pop("LLM_API_KEY", None)
+        os.environ.pop("LLM_BASE_URL", None)
+        os.environ.pop("LLM_MODEL", None)
+        os.environ.pop("LLM_STREAM", None)
+        os.environ.pop("LLM_TIMEOUT_SECONDS", None)
+        os.environ.pop("LLM_MAX_TOKENS", None)
         os.environ.pop("MIN_CONFERENCE_SCORE", None)
         os.environ.pop("MIN_TITLE_ONLY_SCORE", None)
         os.environ.pop("MIN_PAPER_SCORE", None)
@@ -474,6 +481,32 @@ class RetentionTest(unittest.TestCase):
         os.environ["LLM_SUMMARIZE_TITLE_ONLY"] = "true"
         self.assertTrue(should_summarize_paper_with_llm({"source_type": "conference", "summary": "DBLP 题录。"}))
         self.assertTrue(should_summarize_paper_with_llm({"source": "Crossref", "summary": ""}))
+
+    def test_openai_compatible_streaming_response(self) -> None:
+        os.environ["LLM_API_KEY"] = "test-key"
+        os.environ["LLM_BASE_URL"] = "https://example.test/v1"
+        os.environ["LLM_MODEL"] = "test-model"
+        os.environ["LLM_STREAM"] = "true"
+        os.environ["LLM_TIMEOUT_SECONDS"] = "12"
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.__iter__.return_value = iter(
+            [
+                b'data: {"choices":[{"delta":{"content":"{\\\"problem\\\":\\\"test"}}]}\n',
+                b'data: {"choices":[{"delta":{"content":"\\\"}"}}]}\n',
+                b"data: [DONE]\n",
+            ]
+        )
+
+        with mock.patch("scripts.collect_papers.urllib.request.urlopen", return_value=response) as urlopen_mock:
+            result = call_openai_compatible("paper prompt")
+
+        self.assertEqual(result, {"problem": "test"})
+        request = urlopen_mock.call_args.args[0]
+        payload = json.loads(request.data.decode("utf-8"))
+        self.assertTrue(payload["stream"])
+        self.assertEqual(payload["model"], "test-model")
+        self.assertEqual(urlopen_mock.call_args.kwargs["timeout"], 12.0)
 
     def test_merge_retains_previous_high_medium_and_recent_low(self) -> None:
         now = dt.datetime(2026, 5, 28, tzinfo=dt.timezone.utc)

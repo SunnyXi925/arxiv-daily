@@ -1564,6 +1564,7 @@ def fallback_summary(paper: dict[str, Any], best_match: dict[str, Any]) -> dict[
     first_sentence = re.split(r"(?<=[.!?])\s+", abstract)[0] if abstract else ""
     if paper.get("source_type") == "conference" and not has_meaningful_summary(paper):
         return {
+            "analysis_mode": "fallback",
             "problem": "DBLP 题录没有摘要，且未在外部论文索引中找到足够可靠的同题论文摘要。",
             "method": "请打开论文链接查看方法和系统设计细节。",
             "innovation": "仅凭标题无法可靠判断创新点，已避免占用模型翻译额度。",
@@ -1578,6 +1579,7 @@ def fallback_summary(paper: dict[str, Any], best_match: dict[str, Any]) -> dict[
         }
     if not has_meaningful_summary(paper):
         return {
+            "analysis_mode": "fallback",
             "problem": "来源没有提供足够摘要，当前不调用模型做标题猜测。",
             "method": "请打开论文链接查看方法细节。",
             "innovation": "标题信息不足，无法可靠提取创新点。",
@@ -1591,6 +1593,7 @@ def fallback_summary(paper: dict[str, Any], best_match: dict[str, Any]) -> dict[
             "value_functional_medicine": "摘要不足，需要阅读全文后判断。",
         }
     return {
+        "analysis_mode": "fallback",
         "problem": "未配置模型 API，当前仅基于标题、摘要和关键词生成基础摘要。",
         "method": first_sentence[:300] if first_sentence else "请打开论文链接查看方法细节。",
         "innovation": "需要接入模型 API 后自动抽取更精确的中文创新点。",
@@ -1624,10 +1627,13 @@ def call_openai_compatible(prompt: str) -> dict[str, Any]:
         base_url = "https://api.deepseek.com/v1" if os.getenv("DEEPSEEK_API_KEY") else "https://api.openai.com/v1"
     model = os.getenv("LLM_MODEL", "deepseek-chat" if os.getenv("DEEPSEEK_API_KEY") else "gpt-4o-mini")
     endpoint = base_url.rstrip("/") + "/chat/completions"
+    stream = env_flag("LLM_STREAM", True)
     payload = {
         "model": model,
         "temperature": 0.2,
+        "max_tokens": max(256, int(os.getenv("LLM_MAX_TOKENS", "1600"))),
         "response_format": {"type": "json_object"},
+        "stream": stream,
         "messages": [
             {
                 "role": "system",
@@ -1642,9 +1648,30 @@ def call_openai_compatible(prompt: str) -> dict[str, Any]:
         headers=llm_headers(api_key),
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=90) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    content = data["choices"][0]["message"]["content"]
+    timeout_seconds = float(os.getenv("LLM_TIMEOUT_SECONDS", "240"))
+    with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+        if not stream:
+            data = json.loads(resp.read().decode("utf-8"))
+            content = data["choices"][0]["message"]["content"]
+        else:
+            chunks = []
+            for raw_line in resp:
+                line = raw_line.decode("utf-8").strip()
+                if not line.startswith("data:"):
+                    continue
+                event = line[5:].strip()
+                if not event or event == "[DONE]":
+                    continue
+                data = json.loads(event)
+                choice = (data.get("choices") or [{}])[0]
+                delta = choice.get("delta") or {}
+                message = choice.get("message") or {}
+                content_chunk = delta.get("content") or message.get("content") or ""
+                if content_chunk:
+                    chunks.append(str(content_chunk))
+            content = "".join(chunks)
+            if not content:
+                raise ValueError("LLM streaming response contained no content")
     return json.loads(content)
 
 
@@ -1711,6 +1738,7 @@ def summarize_with_llm(topic: Topic, paper: dict[str, Any], base_match: dict[str
     if not isinstance(raw_tags, list):
         raw_tags = []
     summary = {
+        "analysis_mode": "llm",
         "problem": str(data.get("problem", "")),
         "method": str(data.get("method", "")),
         "innovation": str(data.get("innovation", "")),
@@ -2194,6 +2222,15 @@ def collect(
             summary, adjusted_match = summarize_with_llm(topic, paper, paper["best_match"])
             summaries_by_id[str(paper.get("id", ""))] = (summary, adjusted_match)
 
+    llm_success_count = sum(
+        1 for summary, _ in summaries_by_id.values() if summary.get("analysis_mode") == "llm"
+    )
+    llm_failure_count = len(llm_jobs) - llm_success_count if llm_enabled() else 0
+    if llm_enabled() and llm_jobs and env_flag("LLM_REQUIRE_SUCCESS", False) and llm_success_count == 0:
+        raise RuntimeError(
+            f"All {len(llm_jobs)} LLM summaries failed; refusing to publish a fallback-only digest"
+        )
+
     for index, paper in enumerate(recent_papers):
         paper_id = str(paper.get("id", ""))
         if index < max_summaries and paper_id in summaries_by_id:
@@ -2241,6 +2278,9 @@ def collect(
         "source_stats": source_stats,
         "llm_enabled": llm_enabled(),
         "llm_concurrency": int(os.getenv("LLM_CONCURRENCY", "2")),
+        "llm_summary_jobs": len(llm_jobs),
+        "llm_summary_successes": llm_success_count,
+        "llm_summary_failures": llm_failure_count,
         "recent_history_days": recent_history_days,
         "successful_fetches": successful_fetches,
         "failed_fetches": failed_fetches,
