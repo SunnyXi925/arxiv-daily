@@ -116,6 +116,14 @@ NON_HUMAN_HEALTH_TERMS = (
     "bearing fault",
     "turbine fault",
     "remaining useful life",
+    "plant disease",
+    "plant health",
+    "crop health",
+    "precision agriculture",
+    "orchard monitoring",
+    "infected leaves",
+    "leaf disease",
+    "apple scab",
 )
 
 
@@ -1732,6 +1740,34 @@ def llm_headers(api_key: str) -> dict[str, str]:
     }
 
 
+def retryable_llm_error(exc: Exception) -> bool:
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in TRANSIENT_HTTP_CODES
+    return isinstance(
+        exc,
+        (TimeoutError, urllib.error.URLError, OSError, json.JSONDecodeError, KeyError, ValueError),
+    )
+
+
+def complete_llm_summary(summary: dict[str, Any] | None) -> bool:
+    required_fields = (
+        "problem",
+        "method",
+        "innovation",
+        "evidence",
+        "limitations",
+        "why_relevant",
+        "value_precision_nutrition",
+        "value_health_screening",
+        "value_long_term_health",
+    )
+    return bool(
+        isinstance(summary, dict)
+        and summary.get("analysis_mode") == "llm"
+        and all(str(summary.get(field) or "").strip() for field in required_fields)
+    )
+
+
 def call_openai_compatible(prompt: str) -> dict[str, Any]:
     api_key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("DEEPSEEK_API_KEY") or ""
     base_url = os.getenv("LLM_BASE_URL", "")
@@ -1743,7 +1779,7 @@ def call_openai_compatible(prompt: str) -> dict[str, Any]:
     payload = {
         "model": model,
         "temperature": 0.2,
-        "max_tokens": max(256, int(os.getenv("LLM_MAX_TOKENS", "1600"))),
+        "max_tokens": max(256, int(os.getenv("LLM_MAX_TOKENS", "1200"))),
         "response_format": {"type": "json_object"},
         "stream": stream,
         "messages": [
@@ -1754,37 +1790,56 @@ def call_openai_compatible(prompt: str) -> dict[str, Any]:
             {"role": "user", "content": prompt},
         ],
     }
-    req = urllib.request.Request(
-        endpoint,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=llm_headers(api_key),
-        method="POST",
-    )
     timeout_seconds = float(os.getenv("LLM_TIMEOUT_SECONDS", "240"))
-    with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
-        if not stream:
-            data = json.loads(resp.read().decode("utf-8"))
-            content = data["choices"][0]["message"]["content"]
-        else:
-            chunks = []
-            for raw_line in resp:
-                line = raw_line.decode("utf-8").strip()
-                if not line.startswith("data:"):
-                    continue
-                event = line[5:].strip()
-                if not event or event == "[DONE]":
-                    continue
-                data = json.loads(event)
-                choice = (data.get("choices") or [{}])[0]
-                delta = choice.get("delta") or {}
-                message = choice.get("message") or {}
-                content_chunk = delta.get("content") or message.get("content") or ""
-                if content_chunk:
-                    chunks.append(str(content_chunk))
-            content = "".join(chunks)
-            if not content:
-                raise ValueError("LLM streaming response contained no content")
-    return json.loads(content)
+    retry_count = max(1, int(os.getenv("LLM_RETRIES", "2")))
+    retry_wait = max(0.0, float(os.getenv("LLM_RETRY_WAIT_SECONDS", "20")))
+    last_error: Exception | None = None
+    for attempt in range(retry_count):
+        req = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=llm_headers(api_key),
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+                if not stream:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    content = data["choices"][0]["message"]["content"]
+                else:
+                    chunks = []
+                    for raw_line in resp:
+                        line = raw_line.decode("utf-8").strip()
+                        if not line.startswith("data:"):
+                            continue
+                        event = line[5:].strip()
+                        if not event or event == "[DONE]":
+                            continue
+                        data = json.loads(event)
+                        choice = (data.get("choices") or [{}])[0]
+                        delta = choice.get("delta") or {}
+                        message = choice.get("message") or {}
+                        content_chunk = delta.get("content") or message.get("content") or ""
+                        if content_chunk:
+                            chunks.append(str(content_chunk))
+                    content = "".join(chunks)
+                    if not content:
+                        raise ValueError("LLM streaming response contained no content")
+            return json.loads(content)
+        except Exception as exc:
+            last_error = exc
+            if attempt == retry_count - 1 or not retryable_llm_error(exc):
+                raise
+            wait_seconds = retry_wait * (attempt + 1)
+            print(
+                f"Warning: transient LLM error ({exc}); retrying in {wait_seconds:.0f}s "
+                f"({attempt + 2}/{retry_count})",
+                file=sys.stderr,
+                flush=True,
+            )
+            if wait_seconds:
+                time.sleep(wait_seconds)
+    raise RuntimeError(f"LLM request failed: {last_error}")
 
 
 def build_llm_prompt(topic: Topic, paper: dict[str, Any], base_match: dict[str, Any]) -> str:
@@ -2321,16 +2376,58 @@ def collect(
         key=lambda p: (p["best_match"]["score"], paper_activity_datetime(p)),
         reverse=True,
     )
+    active_keys = {paper_key(paper) for paper in recent_papers if paper_key(paper)}
+    pending_retry_limit = max(0, env_int("LLM_MAX_PENDING_RETRIES", 20))
+    pending_retry_count = 0
+    for previous in existing_payload.get("papers", []):
+        if pending_retry_count >= pending_retry_limit or not isinstance(previous, dict):
+            break
+        key = paper_key(previous)
+        if not key or key in active_keys or complete_llm_summary(previous.get("chinese_summary")):
+            continue
+        if not has_meaningful_summary(previous):
+            continue
+        retry_paper = copy.deepcopy(previous)
+        matches = [score_paper(topic, retry_paper) for topic in topics]
+        matches.sort(key=lambda item: item["score"], reverse=True)
+        if not matches or not is_relevant_enough(retry_paper, matches[0]):
+            continue
+        retry_paper["matches"] = matches
+        retry_paper["best_match"] = matches[0]
+        retry_paper["retrying_incomplete_summary"] = True
+        recent_papers.append(retry_paper)
+        active_keys.add(key)
+        pending_retry_count += 1
+    recent_papers.sort(
+        key=lambda p: (p["best_match"]["score"], paper_activity_datetime(p)),
+        reverse=True,
+    )
     summaries_by_id: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+    existing_by_key = {
+        paper_key(paper): paper
+        for paper in existing_payload.get("papers", [])
+        if isinstance(paper, dict) and paper_key(paper)
+    }
+    cached_summary_count = 0
     llm_jobs = []
     for paper in recent_papers[:max_summaries]:
         if not should_summarize_paper_with_llm(paper):
+            continue
+        previous = existing_by_key.get(paper_key(paper))
+        previous_summary = previous.get("chinese_summary") if previous else None
+        if complete_llm_summary(previous_summary):
+            adjusted_match = dict(paper["best_match"])
+            previous_match = previous.get("best_match") or {}
+            adjusted_match["llm_reason"] = previous_match.get("llm_reason") or previous_summary.get("why_relevant", "")
+            adjusted_match["llm_relevant"] = previous_match.get("llm_relevant", True)
+            summaries_by_id[str(paper.get("id", ""))] = (copy.deepcopy(previous_summary), adjusted_match)
+            cached_summary_count += 1
             continue
         best_topic = next(topic for topic in topics if topic.id == paper["best_match"]["topic_id"])
         llm_jobs.append((best_topic, paper))
 
     if llm_enabled() and llm_jobs:
-        concurrency = max(1, int(os.getenv("LLM_CONCURRENCY", "2")))
+        concurrency = max(1, int(os.getenv("LLM_CONCURRENCY", "1")))
         print(f"Summarizing {len(llm_jobs)} papers with LLM using concurrency={concurrency}", flush=True)
         with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
             futures = [executor.submit(summarize_one, job) for job in llm_jobs]
@@ -2343,10 +2440,9 @@ def collect(
             summary, adjusted_match = summarize_with_llm(topic, paper, paper["best_match"])
             summaries_by_id[str(paper.get("id", ""))] = (summary, adjusted_match)
 
-    llm_success_count = sum(
-        1 for summary, _ in summaries_by_id.values() if summary.get("analysis_mode") == "llm"
-    )
-    llm_failure_count = len(llm_jobs) - llm_success_count if llm_enabled() else 0
+    llm_success_count = sum(1 for summary, _ in summaries_by_id.values() if complete_llm_summary(summary))
+    new_llm_success_count = llm_success_count - cached_summary_count
+    llm_failure_count = len(llm_jobs) - new_llm_success_count if llm_enabled() else 0
     if llm_enabled() and llm_jobs and env_flag("LLM_REQUIRE_SUCCESS", False) and llm_success_count == 0:
         raise RuntimeError(
             f"All {len(llm_jobs)} LLM summaries failed; refusing to publish a fallback-only digest"
@@ -2406,6 +2502,9 @@ def collect(
         "llm_enabled": llm_enabled(),
         "llm_concurrency": int(os.getenv("LLM_CONCURRENCY", "2")),
         "llm_summary_jobs": len(llm_jobs),
+        "llm_cached_summaries": cached_summary_count,
+        "llm_pending_retry_count": pending_retry_count,
+        "llm_summary_target_count": len(llm_jobs) + cached_summary_count,
         "llm_summary_successes": llm_success_count,
         "llm_summary_failures": llm_failure_count,
         "llm_relevance_filtered_count": llm_relevance_filtered_count,

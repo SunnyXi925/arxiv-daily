@@ -86,7 +86,8 @@ gh secret list --repo SunnyXi925/arxiv-daily
 | `MAX_SUMMARIES` | `20` | 每次最多调用 LLM 分析的论文数 |
 | `DIGEST_MAX_PAPERS` | `12` | 周报最多收录论文数 |
 | `LLM_TIMEOUT_SECONDS` | `240` | 单次模型流式响应的超时秒数 |
-| `LLM_MAX_TOKENS` | `1600` | 单篇论文分析的最大输出 token 数 |
+| `LLM_MAX_TOKENS` | `1200` | 单篇论文分析的最大输出 token 数 |
+| `LLM_RETRIES` | `2` | 科技云出现 500、限流或超时时的尝试次数 |
 | `CONTACT_EMAIL` | 空 | 写入 arXiv 请求标识的联系邮箱，建议配置 |
 
 ## 放入 Obsidian

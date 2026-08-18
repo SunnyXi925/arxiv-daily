@@ -82,15 +82,44 @@ jobs:
           MIN_DAILY_PAPERS: "0"
           CLEAR_PAPER_CACHE: ${{ github.event_name == 'workflow_dispatch' && inputs.clear_cache || vars.CLEAR_PAPER_CACHE || 'false' }}
           INCREMENTAL_SINCE_LAST_RUN: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
-          LLM_CONCURRENCY: ${{ vars.LLM_CONCURRENCY || '2' }}
+          LLM_CONCURRENCY: ${{ vars.LLM_CONCURRENCY || '1' }}
           LLM_TIMEOUT_SECONDS: ${{ vars.LLM_TIMEOUT_SECONDS || '240' }}
-          LLM_MAX_TOKENS: ${{ vars.LLM_MAX_TOKENS || '1600' }}
+          LLM_MAX_TOKENS: ${{ vars.LLM_MAX_TOKENS || '1200' }}
+          LLM_RETRIES: ${{ vars.LLM_RETRIES || '2' }}
+          LLM_RETRY_WAIT_SECONDS: ${{ vars.LLM_RETRY_WAIT_SECONDS || '20' }}
           LLM_STREAM: "true"
           LLM_REQUIRE_SUCCESS: "true"
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: https://uni-api.cstcloud.cn/v1
           LLM_MODEL: ${{ vars.LLM_MODEL || 'deepseek-v4-flash' }}
         run: python scripts/collect_papers.py
+
+      - name: Stage paper cache
+        run: |
+          mkdir -p .paper-cache
+          cp web/data/papers.json .paper-cache/papers.json
+
+      - name: Save paper data cache
+        uses: actions/cache/save@v4
+        with:
+          path: .paper-cache
+          key: ai-health-paper-data-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Verify complete LLM analysis
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("web/data/papers.json").read_text(encoding="utf-8"))
+          stats = payload.get("stats", {})
+          target = int(stats.get("llm_summary_target_count") or 0)
+          successes = int(stats.get("llm_summary_successes") or 0)
+          failures = int(stats.get("llm_summary_failures") or 0)
+          print(f"LLM analysis quality: target={target}, successes={successes}, failures={failures}")
+          if target and (failures or successes != target):
+              raise SystemExit("Incomplete LLM analysis; cache saved for the next retry")
+          PY
 
       - name: Generate Obsidian weekly digest
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -110,17 +139,6 @@ jobs:
             git pull --rebase --autostash origin main
             git push origin HEAD:main
           fi
-
-      - name: Stage paper cache
-        run: |
-          mkdir -p .paper-cache
-          cp web/data/papers.json .paper-cache/papers.json
-
-      - name: Save paper data cache
-        uses: actions/cache/save@v4
-        with:
-          path: .paper-cache
-          key: ai-health-paper-data-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

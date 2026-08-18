@@ -15,6 +15,7 @@ from scripts.collect_papers import (
     cached_conference_years,
     collect,
     collection_cutoff,
+    complete_llm_summary,
     conference_abstract_sources,
     default_conference_years,
     enrich_conference_paper_from_arxiv,
@@ -81,6 +82,8 @@ class RetentionTest(unittest.TestCase):
         os.environ.pop("LLM_STREAM", None)
         os.environ.pop("LLM_TIMEOUT_SECONDS", None)
         os.environ.pop("LLM_MAX_TOKENS", None)
+        os.environ.pop("LLM_RETRIES", None)
+        os.environ.pop("LLM_RETRY_WAIT_SECONDS", None)
         os.environ.pop("MIN_CONFERENCE_SCORE", None)
         os.environ.pop("MIN_TITLE_ONLY_SCORE", None)
         os.environ.pop("MIN_PAPER_SCORE", None)
@@ -472,11 +475,16 @@ class RetentionTest(unittest.TestCase):
             "title": "Explainable Functional Relation Discovery for Battery State-of-Health",
             "summary": "Battery health management estimates lithium-ion degradation with machine learning.",
         }
+        plant_disease = {
+            "title": "AppleScab-LT: Longitudinal Plant Disease Progression",
+            "summary": "An orchard monitoring dataset tracks infected leaves for crop health management.",
+        }
 
         self.assertFalse(is_relevant_enough(weak_title, {"score": 0.03, "keyword_hits": []}))
         self.assertFalse(is_relevant_enough(weak_conference, {"score": 0.05, "keyword_hits": []}))
         self.assertTrue(is_relevant_enough(keyword_match, {"score": 0.04, "keyword_hits": ["medical agent"]}))
         self.assertFalse(is_relevant_enough(battery, {"score": 0.9, "keyword_hits": ["health management"]}))
+        self.assertFalse(is_relevant_enough(plant_disease, {"score": 0.9, "keyword_hits": ["disease progression"]}))
 
     def test_llm_summary_skips_conference_and_title_only_by_default(self) -> None:
         self.assertFalse(should_summarize_paper_with_llm({"source_type": "conference", "summary": "DBLP 题录。"}))
@@ -514,6 +522,54 @@ class RetentionTest(unittest.TestCase):
         self.assertTrue(payload["stream"])
         self.assertEqual(payload["model"], "test-model")
         self.assertEqual(urlopen_mock.call_args.kwargs["timeout"], 12.0)
+
+    def test_openai_compatible_retries_transient_server_error(self) -> None:
+        os.environ["LLM_API_KEY"] = "test-key"
+        os.environ["LLM_BASE_URL"] = "https://example.test/v1"
+        os.environ["LLM_MODEL"] = "test-model"
+        os.environ["LLM_STREAM"] = "true"
+        os.environ["LLM_RETRIES"] = "2"
+        os.environ["LLM_RETRY_WAIT_SECONDS"] = "0"
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.__iter__.return_value = iter(
+            [
+                b'data: {"choices":[{"delta":{"content":"{\\\"problem\\\":\\\"recovered\\\"}"}}]}\n',
+                b"data: [DONE]\n",
+            ]
+        )
+        server_error = urllib.error.HTTPError("url", 500, "Internal Server Error", {}, None)
+
+        with (
+            mock.patch(
+                "scripts.collect_papers.urllib.request.urlopen",
+                side_effect=[server_error, response],
+            ) as urlopen_mock,
+            mock.patch("scripts.collect_papers.time.sleep") as sleep_mock,
+        ):
+            result = call_openai_compatible("paper prompt")
+
+        self.assertEqual(result, {"problem": "recovered"})
+        self.assertEqual(urlopen_mock.call_count, 2)
+        sleep_mock.assert_not_called()
+
+    def test_complete_llm_summary_requires_all_three_value_fields(self) -> None:
+        summary = {
+            "analysis_mode": "llm",
+            "problem": "problem",
+            "method": "method",
+            "innovation": "innovation",
+            "evidence": "evidence",
+            "limitations": "limitations",
+            "why_relevant": "relevant",
+            "value_precision_nutrition": "low",
+            "value_health_screening": "high",
+            "value_long_term_health": "high",
+        }
+
+        self.assertTrue(complete_llm_summary(summary))
+        summary.pop("value_health_screening")
+        self.assertFalse(complete_llm_summary(summary))
 
     def test_llm_can_reject_non_health_method_analogy(self) -> None:
         os.environ["LLM_API_KEY"] = "test-key"
@@ -882,6 +938,63 @@ class RetentionTest(unittest.TestCase):
         self.assertEqual(payload["stats"]["daily_candidate_paper_count"], 1)
         self.assertEqual(payload["stats"]["daily_backfill_added_count"], 1)
         self.assertTrue(payload["papers"][0]["backfilled_from_recent_arxiv"])
+
+    def test_collect_requeues_cached_incomplete_llm_summary(self) -> None:
+        now = dt.datetime.now(dt.timezone.utc)
+        config = {
+            "sources": [{"type": "arxiv", "name": "arXiv"}],
+            "conference_sources": {"enabled": False},
+            "topics": [
+                {
+                    "id": "patient_trajectory",
+                    "name": "Patient Trajectory",
+                    "description": "clinical patient trajectory forecasting",
+                    "keywords": ["patient trajectory"],
+                    "arxiv_categories": ["cs.LG"],
+                }
+            ],
+        }
+        cached_paper = paper("2608.19999v1", "medium", now.isoformat())
+        cached_paper["chinese_summary"] = {
+            "analysis_mode": "fallback",
+            "problem": "模型调用失败。",
+        }
+        existing = {
+            "generated_at_iso": (now - dt.timedelta(hours=1)).isoformat(),
+            "papers": [cached_paper],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_path = tmp_path / "interests.json"
+            output_path = tmp_path / "papers.json"
+            conference_output_path = tmp_path / "conference.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            output_path.write_text(json.dumps(existing), encoding="utf-8")
+
+            with (
+                mock.patch("scripts.collect_papers.fetch_source_topic", return_value=[]),
+                mock.patch("scripts.collect_papers.time.sleep"),
+            ):
+                payload = collect(
+                    config_path,
+                    output_path,
+                    conference_output_path,
+                    days=1,
+                    max_per_topic=1,
+                    max_summaries=0,
+                    max_new_papers=10,
+                    max_stored_papers=10,
+                    max_new_conference_papers=10,
+                    max_stored_conference_papers=10,
+                    max_data_bytes=0,
+                    incremental_since_last_run=True,
+                    recent_history_days=45,
+                    clear_cache=False,
+                )
+
+        self.assertEqual(payload["stats"]["llm_pending_retry_count"], 1)
+        self.assertTrue(payload["papers"][0]["retrying_incomplete_summary"])
 
 
 if __name__ == "__main__":
