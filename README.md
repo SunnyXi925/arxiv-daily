@@ -36,18 +36,17 @@ alphaXiv 用作论文阅读、讨论和趋势跟踪入口；标题、作者、�
 ## 启用自动运行
 
 1. 在仓库 `Settings -> Pages` 中选择 `GitHub Actions` 作为发布源。
-2. 在 `Settings -> Secrets and variables -> Actions` 中添加模型配置。
-3. 打开 `Actions -> AI Health Weekly Research Radar`，执行一次 `Run workflow` 完成初始化。
+2. 打开 `Actions -> AI Health Weekly Research Radar`，执行一次 `Run workflow` 完成初始化。
 
-推荐配置一个 OpenAI-compatible 模型，否则仍可抓取论文，但创新点和四类研究价值只能生成基础提示。
+默认使用 GitHub Models 的 `openai/gpt-4.1-mini`，通过工作流自带的短期 `GITHUB_TOKEN` 调用，无需额外密钥。需要切换到其他 OpenAI-compatible 服务时，在 `Settings -> Secrets and variables -> Actions` 中配置：
 
 | 类型 | 名称 | 示例 |
 | --- | --- | --- |
-| Secret | `LLM_API_KEY` | 模型服务 API Key |
+| Secret | `LLM_API_KEY` | 自定义模型服务 API Key |
 | Variable | `LLM_BASE_URL` | `https://api.openai.com/v1` |
 | Variable | `LLM_MODEL` | 支持 JSON 输出的模型名 |
 
-也可以只配置 `OPENAI_API_KEY`，或配置 `DEEPSEEK_API_KEY` 使用默认 DeepSeek 接口。
+三个 `LLM_*` 值应一起配置；未配置时自动回退到 GitHub Models。
 
 常用可选变量：
 
@@ -55,7 +54,7 @@ alphaXiv 用作论文阅读、讨论和趋势跟踪入口；标题、作者、�
 | --- | --- | --- |
 | `LOOKBACK_DAYS` | `8` | 每次回看的时间窗口 |
 | `MAX_PER_TOPIC` | `20` | 每个方向最多抓取数量 |
-| `MAX_SUMMARIES` | `30` | 每次最多调用 LLM 分析的论文数 |
+| `MAX_SUMMARIES` | `20` | 每次最多调用 LLM 分析的论文数 |
 | `DIGEST_MAX_PAPERS` | `12` | 周报最多收录论文数 |
 | `CONTACT_EMAIL` | 空 | 写入 arXiv 请求标识的联系邮箱，建议配置 |
 
