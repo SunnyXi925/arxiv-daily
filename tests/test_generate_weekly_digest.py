@@ -38,10 +38,9 @@ def sample_paper(paper_id: str, first_seen: str, score: float, topic_id: str = "
             "limitations": "需要前瞻性临床验证。",
             "why_relevant": "直接匹配营养推荐与健康管理。",
             "paper_tags": ["个性化营养", "Agentic AI"],
-            "value_nutrition": "高：可用于个体化膳食推荐。",
-            "value_health_management": "高：支持长期随访。",
-            "value_post_exam": "中：可承接体检后的干预计划。",
-            "value_functional_medicine": "低：尚未融合多组学证据。",
+            "value_precision_nutrition": "高：可用于个体化膳食推荐。",
+            "value_health_screening": "中：可承接体检后的干预计划。",
+            "value_long_term_health": "高：支持长期随访。",
         },
     }
 
@@ -72,10 +71,9 @@ class WeeklyDigestTest(unittest.TestCase):
         self.assertIn("paper_count: 1", digest)
         self.assertIn("https://alphaxiv.org/abs/2608.12345", digest)
         self.assertIn("**主要创新点**", digest)
-        self.assertIn("营养推荐：高", digest)
-        self.assertIn("健康管理：高", digest)
-        self.assertIn("体检后管理：中", digest)
-        self.assertIn("功能医学：低", digest)
+        self.assertIn("精准营养与代谢干预：高", digest)
+        self.assertIn("健康筛查与高端健管：中", digest)
+        self.assertIn("长期健康管理与慢病预防：高", digest)
 
     def test_write_digest_uses_obsidian_friendly_path(self) -> None:
         payload = {"papers": [sample_paper("2608.12345", "2026-08-18T00:00:00+00:00", 0.9)]}

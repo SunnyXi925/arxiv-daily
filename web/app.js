@@ -210,10 +210,9 @@ function renderPaper(paper) {
   setText(node, ".summary-evidence", summary.evidence);
   setText(node, ".summary-limitations", summary.limitations);
   setText(node, ".summary-relevant", summary.why_relevant);
-  setText(node, ".value-nutrition", summary.value_nutrition);
-  setText(node, ".value-health-management", summary.value_health_management);
-  setText(node, ".value-post-exam", summary.value_post_exam);
-  setText(node, ".value-functional-medicine", summary.value_functional_medicine);
+  setText(node, ".value-precision-nutrition", summary.value_precision_nutrition);
+  setText(node, ".value-health-screening", summary.value_health_screening);
+  setText(node, ".value-long-term-health", summary.value_long_term_health);
   setText(node, ".match-reason", `${best.topic_name || "未分类"}：${best.reason || ""}`);
 
   const tags = node.querySelector(".paper-tags");

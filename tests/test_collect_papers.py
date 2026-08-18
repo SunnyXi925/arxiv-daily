@@ -35,6 +35,7 @@ from scripts.collect_papers import (
     parse_sources,
     should_retry_arxiv_error,
     should_summarize_paper_with_llm,
+    summarize_with_llm,
     split_conference_payload,
     source_request_headers,
     SourceConfig,
@@ -49,7 +50,8 @@ from scripts.collect_papers import (
 def paper(paper_id: str, level: str, published: str) -> dict:
     return {
         "id": paper_id,
-        "title": paper_id,
+        "title": f"Clinical patient health study {paper_id}",
+        "summary": "This clinical study evaluates longitudinal patient health outcomes and personalized care.",
         "published": published,
         "best_match": {
             "topic_id": "topic",
@@ -462,14 +464,19 @@ class RetentionTest(unittest.TestCase):
             "source_type": "conference",
         }
         keyword_match = {
-            "title": "KV cache compression for LLM serving",
+            "title": "A medical agent for longitudinal patient care",
             "summary": "",
             "source_type": "conference",
+        }
+        battery = {
+            "title": "Explainable Functional Relation Discovery for Battery State-of-Health",
+            "summary": "Battery health management estimates lithium-ion degradation with machine learning.",
         }
 
         self.assertFalse(is_relevant_enough(weak_title, {"score": 0.03, "keyword_hits": []}))
         self.assertFalse(is_relevant_enough(weak_conference, {"score": 0.05, "keyword_hits": []}))
-        self.assertTrue(is_relevant_enough(keyword_match, {"score": 0.04, "keyword_hits": ["KV cache compression"]}))
+        self.assertTrue(is_relevant_enough(keyword_match, {"score": 0.04, "keyword_hits": ["medical agent"]}))
+        self.assertFalse(is_relevant_enough(battery, {"score": 0.9, "keyword_hits": ["health management"]}))
 
     def test_llm_summary_skips_conference_and_title_only_by_default(self) -> None:
         self.assertFalse(should_summarize_paper_with_llm({"source_type": "conference", "summary": "DBLP 题录。"}))
@@ -507,6 +514,45 @@ class RetentionTest(unittest.TestCase):
         self.assertTrue(payload["stream"])
         self.assertEqual(payload["model"], "test-model")
         self.assertEqual(urlopen_mock.call_args.kwargs["timeout"], 12.0)
+
+    def test_llm_can_reject_non_health_method_analogy(self) -> None:
+        os.environ["LLM_API_KEY"] = "test-key"
+        topic = Topic(
+            id="health_world_models",
+            name="人体健康世界模型",
+            description="patient state transition modeling",
+            keywords=["patient world model"],
+            arxiv_categories=["cs.AI"],
+        )
+        paper_data = {
+            "id": "test-paper",
+            "title": "A Generic State Transition Model",
+            "summary": "A generic model with no demonstrated patient or clinical application.",
+            "authors": [],
+            "categories": ["cs.AI"],
+        }
+        base_match = {"score": 0.4, "level": "medium", "reason": "test"}
+        llm_result = {
+            "problem": "通用状态建模。",
+            "method": "状态转移模型。",
+            "innovation": "新的训练方法。",
+            "evidence": "离线实验。",
+            "limitations": "没有人体健康验证。",
+            "why_relevant": "仅有方法类比，不应纳入。",
+            "paper_tags": ["状态建模"],
+            "value_precision_nutrition": "低：无直接价值。",
+            "value_health_screening": "低：无直接价值。",
+            "value_long_term_health": "低：无直接价值。",
+            "is_human_health_relevant": "false",
+            "match_level": "low",
+        }
+
+        with mock.patch("scripts.collect_papers.call_openai_compatible", return_value=llm_result):
+            summary, adjusted_match = summarize_with_llm(topic, paper_data, base_match)
+
+        self.assertEqual(summary["value_health_screening"], "低：无直接价值。")
+        self.assertFalse(adjusted_match["llm_relevant"])
+        self.assertEqual(adjusted_match["level"], "low")
 
     def test_merge_retains_previous_high_medium_and_recent_low(self) -> None:
         now = dt.datetime(2026, 5, 28, tzinfo=dt.timezone.utc)
@@ -782,25 +828,25 @@ class RetentionTest(unittest.TestCase):
             "conference_sources": {"enabled": False},
             "topics": [
                 {
-                    "id": "tensor",
-                    "name": "Tensor Compute",
-                    "description": "tensor core architecture for LLM inference",
-                    "keywords": ["tensor core", "LLM inference"],
-                    "arxiv_categories": ["cs.AR"],
+                    "id": "patient_trajectory",
+                    "name": "Patient Trajectory",
+                    "description": "clinical patient trajectory forecasting",
+                    "keywords": ["patient trajectory", "clinical time series"],
+                    "arxiv_categories": ["cs.LG"],
                 }
             ],
         }
         fetched_paper = {
             "id": "2601.00001v1",
             "source": "arXiv",
-            "title": "Fast Tensor Core Architecture for LLM Inference",
+            "title": "Clinical Patient Trajectory Forecasting from Longitudinal Records",
             "authors": ["Ada Example"],
-            "summary": "This paper presents a tensor core architecture for efficient LLM inference. " * 3,
+            "summary": "This clinical study predicts patient trajectories from longitudinal electronic health records. " * 3,
             "published": recent_but_not_today,
             "updated": recent_but_not_today,
             "paper_url": "https://arxiv.org/abs/2601.00001v1",
             "pdf_url": "https://arxiv.org/pdf/2601.00001v1",
-            "categories": ["cs.AR"],
+            "categories": ["cs.LG"],
         }
 
         os.environ["MIN_DAILY_PAPERS"] = "1"

@@ -13,10 +13,9 @@ from typing import Any
 DEFAULT_INPUT = Path("web/data/papers.json")
 DEFAULT_OUTPUT_DIR = Path("obsidian/AI for Health 周报")
 VALUE_FIELDS = (
-    ("营养推荐", "value_nutrition"),
-    ("健康管理", "value_health_management"),
-    ("体检后管理", "value_post_exam"),
-    ("功能医学", "value_functional_medicine"),
+    ("精准营养与代谢干预", "value_precision_nutrition"),
+    ("健康筛查与高端健管", "value_health_screening"),
+    ("长期健康管理与慢病预防", "value_long_term_health"),
 )
 
 
@@ -144,14 +143,16 @@ def render_paper(index: int, paper: dict[str, Any]) -> str:
 def render_opportunities(papers: list[dict[str, Any]]) -> list[str]:
     topic_ids = {str((paper.get("best_match") or {}).get("topic_id") or "") for paper in papers}
     opportunities = []
-    if {"ai_for_nutrition", "health_agents"} <= topic_ids:
+    if {"precision_nutrition", "health_agents"} <= topic_ids:
         opportunities.append("把营养推荐器拆成评估、推荐、风险审查和随访四类 Agent，并比较单智能体与多智能体的可靠性和成本。")
     if {"digital_health_twins", "health_world_models"} & topic_ids:
         opportunities.append("将体检纵向指标建模为可更新的个体状态，比较数字孪生、世界模型与传统时序预测在干预模拟上的差异。")
-    if "health_management" in topic_ids:
+    if "longitudinal_health_prevention" in topic_ids:
         opportunities.append("围绕体检后 30/90/180 天管理路径，评估风险分层、干预依从性和健康指标改善，而不只看离线预测精度。")
-    if "functional_precision_health" in topic_ids:
+    if "health_screening_high_end" in topic_ids:
         opportunities.append("探索多组学、生物标志物与生活方式数据的因果链路，并区分可解释关联与可执行干预建议。")
+    if "adaptive_health_intervention" in topic_ids:
+        opportunities.append("比较因果效应估计、动态治疗方案与强化学习在个体化干预中的适用边界，并优先关注可前瞻验证的策略。")
     if not opportunities:
         opportunities.append("本周信号较分散，建议优先精读最高匹配论文并更新关键词，而不是据此形成强结论。")
     return opportunities
@@ -178,7 +179,7 @@ def generate_weekly_digest(
         f"generated_at: {generated}",
         f"paper_count: {len(selected)}",
         "sources: [arXiv, alphaXiv]",
-        "tags: [AI-for-Health, AI-for-Nutrition, 健康管理, 营养推荐, Agentic-AI, 数字孪生, 世界模型]",
+        "tags: [AI-for-Health, 精准营养, 健康筛查, 高端健管, 长期健康管理, 慢病预防, Agentic-AI]",
         "---",
         "",
         f"# AI for Health & Nutrition 前沿周报｜{end_date.isoformat()}",
@@ -220,7 +221,8 @@ def generate_weekly_digest(
             "",
             "- 发现来源：arXiv API；每篇 arXiv 论文附 alphaXiv 阅读链接。",
             "- 排序依据：关键词、arXiv 分类、主题文本重合度及可选 LLM 复核。",
-            "- 证据边界：自动摘要不等于全文评审；临床、营养与功能医学结论必须二次核验。",
+            "- 相关性门槛：仅保留具有人体健康、医疗或营养语境的论文；电池、设备和工业系统中的 health/状态建模不纳入。",
+            "- 证据边界：自动摘要不等于全文评审；临床、营养与健康管理结论必须二次核验。",
             "- 去重规则：使用规范化 arXiv ID；同一论文版本只保留一条。",
             "",
         ]

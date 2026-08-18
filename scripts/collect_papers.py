@@ -44,6 +44,79 @@ TRANSIENT_HTTP_CODES = {429, 500, 502, 503, 504}
 DBLP_TRANSIENT_HTTP_CODES = {429, 502, 503, 504}
 DEFAULT_SOURCE_TYPES = ["arxiv", "openalex", "crossref"]
 FEED_NAMESPACES = {"atom": "http://www.w3.org/2005/Atom"}
+HUMAN_HEALTH_CONTEXT_TERMS = (
+    "patient",
+    "clinical",
+    "clinician",
+    "medical",
+    "medicine",
+    "healthcare",
+    "digital health",
+    "precision health",
+    "preventive health",
+    "behavioral health",
+    "population health",
+    "personal health",
+    "health data",
+    "health record",
+    "health intervention",
+    "health coaching",
+    "health risk",
+    "human health",
+    "human state",
+    "physiological",
+    "biomedical",
+    "electronic health record",
+    "ehr",
+    "nutrition",
+    "nutritional",
+    "dietary",
+    "food intake",
+    "meal recommendation",
+    "metabolic",
+    "metabolism",
+    "glucose",
+    "glycemic",
+    "microbiome",
+    "nutrigenomics",
+    "metabolomics",
+    "biomarker",
+    "multi-omics",
+    "genomics",
+    "disease",
+    "chronic condition",
+    "diabetes",
+    "obesity",
+    "cardiovascular",
+    "cancer",
+    "oral health",
+    "dental",
+    "dermatology",
+    "mental health",
+    "well-being",
+    "wearable health",
+    "remote patient monitoring",
+    "health screening",
+    "health check-up",
+    "physical examination",
+    "preventive care",
+    "lifestyle intervention",
+    "healthy aging",
+    "healthspan",
+)
+NON_HUMAN_HEALTH_TERMS = (
+    "battery",
+    "lithium-ion",
+    "state-of-charge",
+    "electric vehicle",
+    "power grid",
+    "machine health",
+    "equipment health",
+    "structural health monitoring",
+    "bearing fault",
+    "turbine fault",
+    "remaining useful life",
+)
 
 
 @dataclass(frozen=True)
@@ -1383,6 +1456,18 @@ def env_flag(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def boolean_value(value: Any, default: bool = True) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "1"}:
+            return True
+        if normalized in {"false", "no", "0"}:
+            return False
+    return default
+
+
 def collection_cutoff(
     existing_payload: dict[str, Any],
     now: dt.datetime,
@@ -1428,6 +1513,23 @@ def lexical_overlap_score(topic: Topic, paper: dict[str, Any]) -> float:
     return min(1.0, len(overlap) / max(8, len(topic_terms) * 0.18))
 
 
+def paper_text(paper: dict[str, Any]) -> str:
+    return normalize_space(f"{paper.get('title', '')} {paper.get('summary', '')}").lower()
+
+
+def matching_context_terms(paper: dict[str, Any], terms: tuple[str, ...]) -> list[str]:
+    text = paper_text(paper)
+    return [term for term in terms if term in text]
+
+
+def human_health_context_hits(paper: dict[str, Any]) -> list[str]:
+    return matching_context_terms(paper, HUMAN_HEALTH_CONTEXT_TERMS)
+
+
+def non_human_health_hits(paper: dict[str, Any]) -> list[str]:
+    return matching_context_terms(paper, NON_HUMAN_HEALTH_TERMS)
+
+
 def match_level(score: float) -> str:
     if score >= 0.72:
         return "high"
@@ -1440,12 +1542,19 @@ def score_paper(topic: Topic, paper: dict[str, Any]) -> dict[str, Any]:
     k_score, hits = keyword_score(topic, paper)
     c_score = category_score(topic, paper)
     l_score = lexical_overlap_score(topic, paper)
-    base_score = round(0.50 * k_score + 0.25 * c_score + 0.25 * l_score, 3)
+    health_hits = human_health_context_hits(paper)
+    exclusion_hits = non_human_health_hits(paper)
+    context_score = min(1.0, len(health_hits) / 3.0)
+    base_score = round(0.45 * k_score + 0.20 * c_score + 0.20 * l_score + 0.15 * context_score, 3)
     reason_parts = []
     if hits:
         reason_parts.append("关键词命中：" + "、".join(hits))
     if c_score > 0:
         reason_parts.append("arXiv 分类重合：" + "、".join(sorted(set(topic.arxiv_categories) & set(paper.get("categories", [])))))
+    if health_hits:
+        reason_parts.append("人体健康语境：" + "、".join(health_hits[:4]))
+    if exclusion_hits:
+        reason_parts.append("排除语境：" + "、".join(exclusion_hits[:4]))
     if not reason_parts:
         reason_parts.append("文本语义与方向描述存在弱相关，需要人工复核。")
     return {
@@ -1455,6 +1564,8 @@ def score_paper(topic: Topic, paper: dict[str, Any]) -> dict[str, Any]:
         "level": match_level(base_score),
         "reason": "；".join(reason_parts),
         "keyword_hits": hits,
+        "health_context_hits": health_hits[:8],
+        "exclusion_hits": exclusion_hits[:8],
         "alphaxiv_tags": list(topic.alphaxiv_tags),
     }
 
@@ -1484,6 +1595,10 @@ def has_meaningful_summary(paper: dict[str, Any], min_chars: int = 80) -> bool:
 
 
 def is_relevant_enough(paper: dict[str, Any], best_match: dict[str, Any]) -> bool:
+    if non_human_health_hits(paper):
+        return False
+    if not human_health_context_hits(paper):
+        return False
     if best_match.get("keyword_hits"):
         return True
 
@@ -1492,7 +1607,7 @@ def is_relevant_enough(paper: dict[str, Any], best_match: dict[str, Any]) -> boo
         return score >= env_float("MIN_CONFERENCE_SCORE", 0.18)
     if not has_meaningful_summary(paper):
         return score >= env_float("MIN_TITLE_ONLY_SCORE", 0.18)
-    return score >= env_float("MIN_PAPER_SCORE", 0.08)
+    return score >= env_float("MIN_PAPER_SCORE", 0.12)
 
 
 def enrich_conference_papers_from_arxiv(papers: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1572,10 +1687,9 @@ def fallback_summary(paper: dict[str, Any], best_match: dict[str, Any]) -> dict[
             "limitations": "DBLP 通常不提供摘要；如果 arXiv、Semantic Scholar、OpenAlex 或 Crossref 暂未收录摘要，自动摘要会缺失。",
             "why_relevant": best_match.get("reason", "与配置方向存在文本匹配。"),
             "paper_tags": [],
-            "value_nutrition": "摘要不足，需要阅读全文后判断。",
-            "value_health_management": "摘要不足，需要阅读全文后判断。",
-            "value_post_exam": "摘要不足，需要阅读全文后判断。",
-            "value_functional_medicine": "摘要不足，需要阅读全文后判断。",
+            "value_precision_nutrition": "摘要不足，需要阅读全文后判断。",
+            "value_health_screening": "摘要不足，需要阅读全文后判断。",
+            "value_long_term_health": "摘要不足，需要阅读全文后判断。",
         }
     if not has_meaningful_summary(paper):
         return {
@@ -1587,10 +1701,9 @@ def fallback_summary(paper: dict[str, Any], best_match: dict[str, Any]) -> dict[
             "limitations": "缺少摘要会降低自动相关性和中文总结质量。",
             "why_relevant": best_match.get("reason", "与配置方向存在文本匹配。"),
             "paper_tags": [],
-            "value_nutrition": "摘要不足，需要阅读全文后判断。",
-            "value_health_management": "摘要不足，需要阅读全文后判断。",
-            "value_post_exam": "摘要不足，需要阅读全文后判断。",
-            "value_functional_medicine": "摘要不足，需要阅读全文后判断。",
+            "value_precision_nutrition": "摘要不足，需要阅读全文后判断。",
+            "value_health_screening": "摘要不足，需要阅读全文后判断。",
+            "value_long_term_health": "摘要不足，需要阅读全文后判断。",
         }
     return {
         "analysis_mode": "fallback",
@@ -1601,10 +1714,9 @@ def fallback_summary(paper: dict[str, Any], best_match: dict[str, Any]) -> dict[
         "limitations": "基础模式不会阅读全文，也不会进行深度技术对比。",
         "why_relevant": best_match.get("reason", "与配置方向存在文本匹配。"),
         "paper_tags": list(best_match.get("keyword_hits", [])),
-        "value_nutrition": "基础模式仅能依据关键词判断，建议结合原文复核。",
-        "value_health_management": "基础模式仅能依据关键词判断，建议结合原文复核。",
-        "value_post_exam": "基础模式仅能依据关键词判断，建议结合原文复核。",
-        "value_functional_medicine": "基础模式仅能依据关键词判断，建议结合原文复核。",
+        "value_precision_nutrition": "基础模式仅能依据关键词判断，建议结合原文复核。",
+        "value_health_screening": "基础模式仅能依据关键词判断，建议结合原文复核。",
+        "value_long_term_health": "基础模式仅能依据关键词判断，建议结合原文复核。",
     }
 
 
@@ -1683,9 +1795,15 @@ def build_llm_prompt(topic: Topic, paper: dict[str, Any], base_match: dict[str, 
 1. 先识别论文真正解决的问题、核心机制、实验或系统证据，再翻译成自然中文。
 2. 不要夸大摘要中没有的信息；如果证据不足，请明确说明。
 3. 相关性判断要严格，说明它具体匹配哪些关键词、健康场景或研究问题。
-4. 分别评估对营养推荐、健康管理、体检后管理、功能医学的价值。没有直接价值时明确写“低”，不要牵强附会。
+4. 只评估下面三个业务价值领域；没有直接价值时明确写“低”，不要把非人体领域的方法类比包装成价值。
 5. 论文标签使用 3-6 个简短中英文标签，优先覆盖研究对象、数据模态、方法和应用场景。
 6. 如果论文只是泛泛相关，请把 match_level 降为 medium 或 low，并在 why_relevant 里说明需要人工复核。
+7. 人体健康相关性是硬门槛。电池、设备、工业系统、结构健康监测等论文即使使用 health、state、trajectory、world model 等词，也必须将 is_human_health_relevant 设为 false。
+
+三个价值领域：
+- 精准营养与代谢干预：个性化营养、膳食评估、食物推荐、餐后血糖与代谢反应、营养基因组/代谢组/微生物组、N-of-1 与自适应干预。
+- 健康筛查与高端健管：体检解释、早期风险识别、风险分层、异常管理、复查转诊、多年体检轨迹，以及功能医学、系统医学、生活方式医学、多组学、暴露组、P4 Medicine、健康寿命和综合干预。
+- 长期健康管理与慢病预防：可穿戴与远程监测、数字生物标志物、健康轨迹、疾病进展、个体化干预、动态治疗方案、衰老管理与主动健康。
 
 我的研究方向：
 名称：{topic.name}
@@ -1713,10 +1831,10 @@ arXiv 分类：{", ".join(paper.get("categories", []))}
   "limitations": "可能局限或需要阅读全文确认的点",
   "why_relevant": "为什么匹配我的研究方向",
   "paper_tags": ["标签1", "标签2", "标签3"],
-  "value_nutrition": "对营养推荐的价值：高/中/低 + 一句具体理由",
-  "value_health_management": "对健康管理的价值：高/中/低 + 一句具体理由",
-  "value_post_exam": "对体检后管理的价值：高/中/低 + 一句具体理由",
-  "value_functional_medicine": "对功能医学的价值：高/中/低 + 一句具体理由",
+  "value_precision_nutrition": "对精准营养与代谢干预的价值：高/中/低 + 一句具体理由",
+  "value_health_screening": "对健康筛查与高端健管的价值：高/中/低 + 一句具体理由",
+  "value_long_term_health": "对长期健康管理与慢病预防的价值：高/中/低 + 一句具体理由",
+  "is_human_health_relevant": true,
   "match_score_adjustment": 0.0,
   "match_level": "high|medium|low"
 }}
@@ -1746,10 +1864,9 @@ def summarize_with_llm(topic: Topic, paper: dict[str, Any], base_match: dict[str
         "limitations": str(data.get("limitations", "")),
         "why_relevant": str(data.get("why_relevant", "")),
         "paper_tags": [str(tag) for tag in raw_tags[:6]],
-        "value_nutrition": str(data.get("value_nutrition", "未评估")),
-        "value_health_management": str(data.get("value_health_management", "未评估")),
-        "value_post_exam": str(data.get("value_post_exam", "未评估")),
-        "value_functional_medicine": str(data.get("value_functional_medicine", "未评估")),
+        "value_precision_nutrition": str(data.get("value_precision_nutrition", "未评估")),
+        "value_health_screening": str(data.get("value_health_screening", "未评估")),
+        "value_long_term_health": str(data.get("value_long_term_health", "未评估")),
     }
     adjustment = float(data.get("match_score_adjustment", 0.0) or 0.0)
     adjusted_score = max(0.0, min(1.0, base_match["score"] + adjustment))
@@ -1760,6 +1877,7 @@ def summarize_with_llm(topic: Topic, paper: dict[str, Any], base_match: dict[str
     adjusted_match["score"] = round(adjusted_score, 3)
     adjusted_match["level"] = adjusted_level
     adjusted_match["llm_reason"] = summary["why_relevant"]
+    adjusted_match["llm_relevant"] = boolean_value(data.get("is_human_health_relevant"), True)
     return summary, adjusted_match
 
 
@@ -1880,6 +1998,9 @@ def merge_with_retained_papers(
             continue
         key = paper_key(paper)
         if not key:
+            continue
+        if not is_relevant_enough(paper, paper.get("best_match") or {}):
+            dropped_low += 1
             continue
         seen_at = parse_datetime(str(paper.get("first_seen_at") or paper.get("last_seen_at") or existing_generated_at))
         is_recent = bool(
@@ -2241,6 +2362,12 @@ def collect(
         else:
             paper["chinese_summary"] = fallback_summary(paper, paper["best_match"])
 
+    before_llm_filter_count = len(recent_papers)
+    recent_papers = [
+        paper for paper in recent_papers if (paper.get("best_match") or {}).get("llm_relevant", True)
+    ]
+    llm_relevance_filtered_count = before_llm_filter_count - len(recent_papers)
+
     daily_recent_papers = [paper for paper in recent_papers if paper.get("source_type") != "conference"]
     conference_recent_papers = [paper for paper in recent_papers if paper.get("source_type") == "conference"]
     daily_merged_papers, daily_retention_stats = merge_with_retained_papers(
@@ -2281,6 +2408,7 @@ def collect(
         "llm_summary_jobs": len(llm_jobs),
         "llm_summary_successes": llm_success_count,
         "llm_summary_failures": llm_failure_count,
+        "llm_relevance_filtered_count": llm_relevance_filtered_count,
         "recent_history_days": recent_history_days,
         "successful_fetches": successful_fetches,
         "failed_fetches": failed_fetches,
