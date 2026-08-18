@@ -1,0 +1,48 @@
+tests/test_generate_weekly_digest.py
+  s_edd0bf87669dbe::t_5e5d69de472a89 1-91
+scripts/collect_papers.py
+  s_edd0bf87669dbe::t_f15e15a35b92d4 1-454,461-514,516-1457,1459-1561,1563-1698,1700-1737,1739-2174,2176-2362
+  s_edd0bf87669dbe::t_c39d9666d88467 2175
+  s_edd0bf87669dbe::t_bc9d6f84f5e33d 455-460,515
+  s_edd0bf87669dbe::t_2c15d6333cd591 1562,1699,1738
+  s_edd0bf87669dbe::t_fe99a31d3e6623 1458
+web/index.html
+  s_edd0bf87669dbe::t_3609db7039fffc 7,174
+  s_edd0bf87669dbe::t_19ec050e4a24c6 99
+  s_edd0bf87669dbe::t_a5a5a6cae9ebe8 1-6,8-98,100-173,175-176
+config/interests.json
+  s_edd0bf87669dbe::t_f052eb300ed407 1-150
+web/app.js
+  s_edd0bf87669dbe::t_a5a5a6cae9ebe8 1-219,221-414
+  s_edd0bf87669dbe::t_fe99a31d3e6623 220
+scripts/generate_weekly_digest.py
+  s_edd0bf87669dbe::t_5e5d69de472a89 1-111,113-128,130-267
+  s_edd0bf87669dbe::t_fe99a31d3e6623 112,129
+tests/test_collect_papers.py
+  s_edd0bf87669dbe::t_fe99a31d3e6623 1-809
+.github/workflows/ai-health-weekly.yml
+  s_edd0bf87669dbe::t_6088e9bd0696ef 1-75,81-82,84-135
+  s_edd0bf87669dbe::t_bc9d6f84f5e33d 76-80,83
+web/data/papers.json
+  s_edd0bf87669dbe::t_19ec050e4a24c6 1,14
+  s_edd0bf87669dbe::t_fb804229d9bfb3 2-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.0.50",
+  "base_commit_sha": "3e7864d96379c950a9dc40900f45cb68ba63cb81",
+  "prompts": {},
+  "sessions": {
+    "s_edd0bf87669dbe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f65ad-87d4-7500-a991-ce7f280c2228",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "fengxi.25 <fengxi.25@jd.com>",
+      "total_additions": 3994,
+      "total_deletions": 72,
+      "accepted_lines": 3922
+    }
+  }
+}
