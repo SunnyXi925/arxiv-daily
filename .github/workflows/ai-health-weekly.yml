@@ -126,7 +126,7 @@ jobs:
         env:
           DIGEST_LOOKBACK_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.lookback_days || vars.LOOKBACK_DAYS || '8' }}
           DIGEST_MAX_PAPERS: ${{ vars.DIGEST_MAX_PAPERS || '12' }}
-        run: python scripts/generate_weekly_digest.py --lookback-days "$DIGEST_LOOKBACK_DAYS" --max-papers "$DIGEST_MAX_PAPERS"
+        run: python scripts/generate_weekly_digest.py --output-dir "obsidian/AI for Health 周报" --lookback-days "$DIGEST_LOOKBACK_DAYS" --max-papers "$DIGEST_MAX_PAPERS"
 
       - name: Commit Obsidian digest
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

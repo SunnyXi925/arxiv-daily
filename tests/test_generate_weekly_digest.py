@@ -1,11 +1,14 @@
 import datetime as dt
+import os
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from scripts.generate_weekly_digest import (
     alpha_xiv_url,
     canonical_arxiv_id,
+    default_output_dir,
     generate_weekly_digest,
     select_weekly_papers,
     write_weekly_digest,
@@ -83,6 +86,23 @@ class WeeklyDigestTest(unittest.TestCase):
             self.assertEqual(path.name, "2026-08-19_AI健康前沿周报.md")
             self.assertEqual(path.parent.name, "2026")
             self.assertTrue(path.exists())
+
+    def test_default_output_dir_uses_aix_nutrition_vault(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch(
+            "scripts.generate_weekly_digest.Path.home", return_value=Path("/Users/example")
+        ):
+            output_dir = default_output_dir()
+
+        self.assertEqual(
+            output_dir,
+            Path("/Users/example/Documents/Obsidian Vault/AIx营养/AI for Health 周报"),
+        )
+
+    def test_default_output_dir_allows_environment_override(self) -> None:
+        with mock.patch.dict(os.environ, {"OBSIDIAN_DIGEST_DIR": "~/custom-digests"}):
+            output_dir = default_output_dir()
+
+        self.assertEqual(output_dir, Path("~/custom-digests").expanduser())
 
 
 if __name__ == "__main__":

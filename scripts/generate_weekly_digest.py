@@ -5,18 +5,26 @@ import argparse
 import collections
 import datetime as dt
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
 
 
 DEFAULT_INPUT = Path("web/data/papers.json")
-DEFAULT_OUTPUT_DIR = Path("obsidian/AI for Health 周报")
+LOCAL_OBSIDIAN_DIR = Path("Documents/Obsidian Vault/AIx营养/AI for Health 周报")
 VALUE_FIELDS = (
     ("精准营养与代谢干预", "value_precision_nutrition"),
     ("健康筛查与高端健管", "value_health_screening"),
     ("长期健康管理与慢病预防", "value_long_term_health"),
 )
+
+
+def default_output_dir() -> Path:
+    configured = os.getenv("OBSIDIAN_DIGEST_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / LOCAL_OBSIDIAN_DIR
 
 
 def parse_datetime(value: str | None) -> dt.datetime | None:
@@ -250,7 +258,7 @@ def write_weekly_digest(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate an Obsidian weekly digest from collected paper data.")
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--output-dir", type=Path, default=default_output_dir())
     parser.add_argument("--lookback-days", type=int, default=8)
     parser.add_argument("--max-papers", type=int, default=12)
     parser.add_argument("--date", help="Override generation date as YYYY-MM-DD for reproducible tests.")

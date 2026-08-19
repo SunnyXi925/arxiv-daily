@@ -18,11 +18,13 @@
 
 ## 每周产出
 
-周报写入：
+本地生成的周报默认写入：
 
 ```text
-obsidian/AI for Health 周报/YYYY/YYYY-MM-DD_AI健康前沿周报.md
+/Users/fengxi.25/Documents/Obsidian Vault/AIx营养/AI for Health 周报/YYYY/YYYY-MM-DD_AI健康前沿周报.md
 ```
+
+可通过 `OBSIDIAN_DIGEST_DIR` 或 `--output-dir` 覆盖。GitHub Actions 无法访问本机目录，因此云端任务仍将周报提交到仓库内的 `obsidian/AI for Health 周报/`，拉取仓库后可同步到上述本地目录。
 
 每篇论文包含：
 
@@ -45,7 +47,7 @@ alphaXiv 用作论文阅读、讨论和趋势跟踪入口；标题、作者、�
 https://uni-api.cstcloud.cn/v1
 ```
 
-默认模型为 `deepseek-v4-flash`。没有密钥时仍会抓取论文并生成基础周报，但主要创新点和四类研究价值只能提供待复核提示。
+默认模型为 `deepseek-v4-flash`。没有密钥时仍会抓取论文并生成基础周报，但主要创新点和三类研究价值只能提供待复核提示。
 
 | 类型 | 名称 | 示例 |
 | --- | --- | --- |
@@ -92,13 +94,17 @@ gh secret list --repo SunnyXi925/arxiv-daily
 
 ## 放入 Obsidian
 
-最简单的方式是将仓库克隆到 Obsidian Vault 中。GitHub Actions 生成并提交周报后，在本地执行：
+本地运行生成器时，周报会直接进入 `AIx营养/AI for Health 周报/`。GitHub Actions 生成并提交周报后，在本地执行：
 
 ```bash
 git pull
 ```
 
-随后 Obsidian 会直接识别 `obsidian/AI for Health 周报/` 下的 Markdown 文件。
+云端副本位于仓库的 `obsidian/AI for Health 周报/`；可将其同步到本地默认目录。需要临时改用其他目录时：
+
+```bash
+OBSIDIAN_DIGEST_DIR="/path/to/vault/folder" python3 scripts/generate_weekly_digest.py
+```
 
 ## 本地验证
 
@@ -115,8 +121,8 @@ python3 scripts/generate_weekly_digest.py --lookback-days 8 --max-papers 12
 ```text
 config/interests.json                 研究领域、关键词、arXiv 分类与 alphaXiv 标签
 scripts/collect_papers.py             检索、去重、评分与中文分析
-scripts/generate_weekly_digest.py     Obsidian 周报生成器
-obsidian/AI for Health 周报/           自动生成的周报
+scripts/generate_weekly_digest.py     Obsidian 周报生成器（本地默认写入 AIx营养）
+obsidian/AI for Health 周报/           GitHub Actions 提交的云端副本
 web/                                  GitHub Pages 页面
 tests/                                采集器和周报生成器测试
 .github/workflows/ai-health-weekly.yml 每周三自动任务
