@@ -20,11 +20,8 @@ const state = {
 const nodes = {
   updatedAt: document.querySelector("#updatedAt"),
   paperCount: document.querySelector("#paperCount"),
-  weekCount: document.querySelector("#weekCount"),
-  monthCount: document.querySelector("#monthCount"),
   topScore: document.querySelector("#topScore"),
   resultCount: document.querySelector("#resultCount"),
-  viewTitle: document.querySelector("#viewTitle"),
   listTitle: document.querySelector("#listTitle"),
   scopeLabel: document.querySelector("#scopeLabel"),
   paperList: document.querySelector("#paperList"),
@@ -32,6 +29,7 @@ const nodes = {
   levelFilter: document.querySelector("#levelFilter"),
   dateFilter: document.querySelector("#dateFilter"),
   searchInput: document.querySelector("#searchInput"),
+  resetFilters: document.querySelector("#resetFilters"),
   themeOptions: document.querySelectorAll("[data-theme-option]"),
   collectionTabs: document.querySelectorAll("[data-collection]"),
   tabs: document.querySelectorAll(".tab"),
@@ -196,9 +194,14 @@ function renderPaper(paper) {
   const summary = paper.chinese_summary || {};
   const badge = node.querySelector(".match-badge");
   const level = levelOf(paper);
+  const score = Math.max(0, Math.min(1, scoreOf(paper)));
+  const levelLabel = { high: "高匹配", medium: "中匹配", low: "低匹配" }[level] || "匹配";
 
-  badge.textContent = `${level} ${scoreOf(paper).toFixed(2)}`;
+  badge.textContent = `${levelLabel} ${score.toFixed(2)}`;
   badge.classList.add(level);
+  node.classList.add(`match-${level}`);
+  node.querySelector(".signal-fill").style.width = `${score * 100}%`;
+  node.setAttribute("aria-label", `${paper.title || "论文"}，${levelLabel} ${score.toFixed(2)}`);
 
   setText(node, ".paper-date", `发布 ${formatDate(paper.published)} · 收录 ${formatDate(collectionTime(paper))}`);
   setText(node, ".paper-source", paper.source || "paper");
@@ -263,10 +266,9 @@ function viewLabels() {
 
 function updateHeadings(papers) {
   const labels = viewLabels()[state.filters.view];
-  nodes.viewTitle.textContent = labels[0];
   nodes.listTitle.textContent = labels[0];
   nodes.scopeLabel.textContent = labels[1];
-  nodes.resultCount.textContent = `${papers.length} 篇`;
+  nodes.resultCount.textContent = String(papers.length);
 }
 
 function render() {
@@ -285,6 +287,7 @@ function render() {
   const fragment = document.createDocumentFragment();
   for (const paper of papers) fragment.appendChild(renderPaper(paper));
   nodes.paperList.appendChild(fragment);
+  window.lucide?.createIcons();
 }
 
 function hydrateTopicFilter() {
@@ -314,14 +317,17 @@ function hydrateDateFilter() {
 
 function updateStats() {
   const papers = activeData().papers || [];
-  const date = selectedDate();
-  const weekPapers = papers.filter((paper) => inRange(collectionTime(paper), startOfWeek(date), endOfWeek(date)));
-  const monthPapers = papers.filter((paper) => inRange(collectionTime(paper), startOfMonth(date), endOfMonth(date)));
   const top = papers.reduce((max, paper) => Math.max(max, scoreOf(paper)), 0);
   nodes.paperCount.textContent = String(papers.length);
-  nodes.weekCount.textContent = String(weekPapers.length);
-  nodes.monthCount.textContent = String(monthPapers.length);
   nodes.topScore.textContent = top.toFixed(2);
+}
+
+function setActiveTab(activeTab) {
+  for (const item of nodes.tabs) {
+    const active = item === activeTab;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-selected", String(active));
+  }
 }
 
 function bindEvents() {
@@ -342,13 +348,22 @@ function bindEvents() {
     state.filters.level = event.target.value;
     render();
   });
+  nodes.resetFilters.addEventListener("click", () => {
+    state.filters.query = "";
+    state.filters.topic = "all";
+    state.filters.level = "all";
+    nodes.searchInput.value = "";
+    nodes.topicFilter.value = "all";
+    nodes.levelFilter.value = "all";
+    render();
+  });
   for (const tab of nodes.collectionTabs) {
     tab.addEventListener("click", () => {
       state.filters.collection = tab.dataset.collection;
       state.filters.view = state.filters.collection === "conference" ? "all" : "daily";
       state.filters.topic = "all";
       for (const item of nodes.collectionTabs) item.classList.toggle("active", item === tab);
-      for (const item of nodes.tabs) item.classList.toggle("active", item.dataset.view === state.filters.view);
+      setActiveTab([...nodes.tabs].find((item) => item.dataset.view === state.filters.view));
       hydrateTopicFilter();
       hydrateDateFilter();
       updateStats();
@@ -364,7 +379,7 @@ function bindEvents() {
   for (const tab of nodes.tabs) {
     tab.addEventListener("click", () => {
       state.filters.view = tab.dataset.view;
-      for (const item of nodes.tabs) item.classList.toggle("active", item === tab);
+      setActiveTab(tab);
       render();
     });
   }
@@ -390,6 +405,7 @@ function updateUpdatedAt(message = "") {
 
 async function main() {
   applyTheme(storedTheme());
+  window.lucide?.createIcons();
   bindEvents();
   try {
     state.datasets.daily = await loadData();

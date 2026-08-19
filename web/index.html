@@ -4,18 +4,24 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AI Health Research Radar</title>
-    <link rel="stylesheet" href="./styles.css?v=20260818-health-radar" />
+    <meta name="theme-color" content="#101918" />
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css?v=20260819-research-workbench" />
   </head>
   <body>
     <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark">AH</span>
+      <a class="brand" href="#papers" aria-label="返回论文列表顶部">
+        <span class="brand-mark" aria-hidden="true"><i data-lucide="activity"></i></span>
         <div>
-          <h1>AI Health Research Radar</h1>
-          <p id="updatedAt">正在读取数据</p>
+          <h1>AI Health Radar</h1>
+          <p>健康与营养前沿</p>
         </div>
-      </div>
+      </a>
       <nav class="top-actions" aria-label="页面操作">
+        <p class="update-status"><span class="status-dot" aria-hidden="true"></span><span id="updatedAt">正在读取数据</span></p>
         <div class="theme-switcher" role="radiogroup" aria-label="选择网站背景主题">
           <button class="theme-option" type="button" role="radio" aria-checked="true" data-theme-option="dark" title="深色主题">
             <span class="theme-swatch dark-swatch"></span>
@@ -30,43 +36,21 @@
             <span>护眼</span>
           </button>
         </div>
-        <a class="icon-link" href="https://github.com/SunnyXi925/arxiv-daily/blob/main/config/interests.json" target="_blank" rel="noreferrer" title="查看研究方向">⚙</a>
-        <a class="icon-link" href="https://github.com/SunnyXi925/arxiv-daily/actions" target="_blank" rel="noreferrer" title="查看更新任务">↻</a>
+        <a class="icon-link" href="https://github.com/SunnyXi925/arxiv-daily/blob/main/config/interests.json" target="_blank" rel="noreferrer" title="查看研究方向" aria-label="查看研究方向"><i data-lucide="sliders-horizontal"></i></a>
+        <a class="icon-link" href="https://github.com/SunnyXi925/arxiv-daily/actions" target="_blank" rel="noreferrer" title="查看更新任务" aria-label="查看更新任务"><i data-lucide="refresh-cw"></i></a>
       </nav>
     </header>
 
     <main class="shell">
-      <section class="overview" aria-label="概览">
-        <div class="overview-title">
-          <p>Health & Nutrition Research Radar</p>
-          <h2 id="viewTitle">最新论文</h2>
-        </div>
-        <div class="metric-grid">
-          <div class="metric">
-            <span class="metric-value" id="paperCount">0</span>
-            <span class="metric-label">总论文</span>
-          </div>
-          <div class="metric">
-            <span class="metric-value" id="weekCount">0</span>
-            <span class="metric-label">本周新增</span>
-          </div>
-          <div class="metric">
-            <span class="metric-value" id="monthCount">0</span>
-            <span class="metric-label">本月新增</span>
-          </div>
-          <div class="metric accent">
-            <span class="metric-value" id="topScore">0.00</span>
-            <span class="metric-label">最高匹配</span>
-          </div>
-        </div>
-      </section>
-
       <section class="toolbar" aria-label="筛选">
-        <div class="tabs" role="tablist" aria-label="视图">
-          <button class="tab" type="button" data-view="all">全部</button>
-          <button class="tab active" type="button" data-view="week">本周</button>
-          <button class="tab" type="button" data-view="month">本月</button>
-          <button class="tab" type="button" data-view="highlights">本周精选</button>
+        <div class="toolbar-primary">
+          <div class="tabs" role="tablist" aria-label="视图">
+            <button class="tab" type="button" role="tab" aria-selected="false" data-view="all">全部</button>
+            <button class="tab active" type="button" role="tab" aria-selected="true" data-view="week">本周</button>
+            <button class="tab" type="button" role="tab" aria-selected="false" data-view="month">本月</button>
+            <button class="tab" type="button" role="tab" aria-selected="false" data-view="highlights">本周精选</button>
+          </div>
+          <span class="scope-inline" id="scopeLabel">-</span>
         </div>
         <div class="filters">
           <label class="field compact">
@@ -90,16 +74,30 @@
             <span>搜索</span>
             <input id="searchInput" type="search" placeholder="标题、作者、关键词" />
           </label>
+          <button class="reset-button" id="resetFilters" type="button" title="重置筛选" aria-label="重置筛选"><i data-lucide="rotate-ccw"></i></button>
         </div>
       </section>
 
-      <section class="content">
+      <section class="content" id="papers">
         <div class="content-head">
-          <div>
+          <div class="feed-heading">
+            <p class="section-kicker">Research feed</p>
             <h2 id="listTitle">本周论文</h2>
-            <p id="scopeLabel">-</p>
           </div>
-          <span id="resultCount">0 篇</span>
+          <dl class="feed-stats" aria-label="论文统计">
+            <div>
+              <dt>当前结果</dt>
+              <dd id="resultCount">0</dd>
+            </div>
+            <div>
+              <dt>总收录</dt>
+              <dd id="paperCount">0</dd>
+            </div>
+            <div>
+              <dt>最高匹配</dt>
+              <dd id="topScore">0.00</dd>
+            </div>
+          </dl>
         </div>
         <div id="paperList" class="paper-list"></div>
       </section>
@@ -107,66 +105,77 @@
 
     <template id="paperTemplate">
       <article class="paper-card">
+        <div class="signal-track" aria-hidden="true"><span class="signal-fill"></span></div>
         <div class="paper-main">
-          <div class="paper-meta">
+          <div class="paper-heading">
+            <div class="paper-meta">
+              <span class="paper-date"></span>
+              <span class="paper-source"></span>
+            </div>
             <span class="match-badge"></span>
-            <span class="paper-date"></span>
-            <span class="paper-source"></span>
           </div>
           <h3 class="paper-title"></h3>
           <p class="paper-authors"></p>
           <div class="paper-tags"></div>
-          <dl class="summary-grid">
-            <div>
-              <dt>问题</dt>
-              <dd class="summary-problem"></dd>
-            </div>
-            <div>
-              <dt>方法</dt>
-              <dd class="summary-method"></dd>
-            </div>
-            <div>
-              <dt>创新</dt>
-              <dd class="summary-innovation"></dd>
-            </div>
-            <div>
-              <dt>证据</dt>
-              <dd class="summary-evidence"></dd>
-            </div>
-            <div>
-              <dt>局限</dt>
-              <dd class="summary-limitations"></dd>
-            </div>
-            <div>
-              <dt>匹配</dt>
-              <dd class="summary-relevant"></dd>
-            </div>
-            <div>
-              <dt>精准营养与代谢干预</dt>
-              <dd class="value-precision-nutrition"></dd>
-            </div>
-            <div>
-              <dt>健康筛查与高端健管</dt>
-              <dd class="value-health-screening"></dd>
-            </div>
-            <div>
-              <dt>长期健康管理与慢病预防</dt>
-              <dd class="value-long-term-health"></dd>
-            </div>
-          </dl>
+          <div class="paper-analysis">
+            <dl class="summary-grid">
+              <div>
+                <dt>研究问题</dt>
+                <dd class="summary-problem"></dd>
+              </div>
+              <div>
+                <dt>核心方法</dt>
+                <dd class="summary-method"></dd>
+              </div>
+              <div>
+                <dt>主要创新</dt>
+                <dd class="summary-innovation"></dd>
+              </div>
+              <div>
+                <dt>证据与结果</dt>
+                <dd class="summary-evidence"></dd>
+              </div>
+              <div>
+                <dt>局限</dt>
+                <dd class="summary-limitations"></dd>
+              </div>
+              <div>
+                <dt>为何值得关注</dt>
+                <dd class="summary-relevant"></dd>
+              </div>
+            </dl>
+            <section class="value-panel" aria-label="业务应用价值">
+              <h4>业务应用价值</h4>
+              <dl>
+                <div>
+                  <dt>精准营养与代谢干预</dt>
+                  <dd class="value-precision-nutrition"></dd>
+                </div>
+                <div>
+                  <dt>健康筛查与高端健管</dt>
+                  <dd class="value-health-screening"></dd>
+                </div>
+                <div>
+                  <dt>长期健康管理与慢病预防</dt>
+                  <dd class="value-long-term-health"></dd>
+                </div>
+              </dl>
+            </section>
+          </div>
         </div>
         <footer class="paper-footer">
           <span class="match-reason"></span>
           <div class="paper-links">
-            <a class="paper-link abs-link" target="_blank" rel="noreferrer">原文</a>
-            <a class="paper-link alphaxiv-link" target="_blank" rel="noreferrer">alphaXiv</a>
-            <a class="paper-link pdf-link" target="_blank" rel="noreferrer">PDF</a>
-            <a class="paper-link download-link">下载 PDF</a>
+            <a class="paper-link abs-link" target="_blank" rel="noreferrer"><i data-lucide="external-link"></i>原文</a>
+            <a class="paper-link alphaxiv-link" target="_blank" rel="noreferrer"><i data-lucide="messages-square"></i>alphaXiv</a>
+            <a class="paper-link pdf-link" target="_blank" rel="noreferrer"><i data-lucide="file-text"></i>PDF</a>
+            <a class="paper-link download-link"><i data-lucide="download"></i>下载</a>
           </div>
         </footer>
       </article>
     </template>
 
-    <script src="./app.js?v=20260818-health-radar"></script>
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script src="./app.js?v=20260819-research-workbench"></script>
   </body>
 </html>
