@@ -26,6 +26,7 @@ from typing import Any
 ARXIV_API_URL = "https://export.arxiv.org/api/query"
 DBLP_API_URL = os.getenv("DBLP_API_URL", "http://dblp.org/search/publ/api")
 OPENALEX_WORKS_URL = "https://api.openalex.org/works"
+OPENALEX_ARXIV_SOURCE_ID = "S4306400194"
 CROSSREF_WORKS_URL = "https://api.crossref.org/works"
 SEMANTIC_SCHOLAR_SEARCH_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
 SERPAPI_SEARCH_URL = "https://serpapi.com/search.json"
@@ -593,7 +594,14 @@ def fetch_arxiv_query(search_query: str, max_results: int, sort_by: str, sort_or
     timeout_seconds = float(os.getenv("ARXIV_TIMEOUT_SECONDS", "90"))
     last_error: Exception | None = None
     for attempt in range(retry_count):
-        req = urllib.request.Request(url, headers={"User-Agent": arxiv_user_agent()})
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": arxiv_user_agent(),
+                "Accept": "application/atom+xml",
+                "Accept-Encoding": "identity",
+            },
+        )
         try:
             with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
                 xml_data = resp.read()
@@ -1213,6 +1221,65 @@ def fetch_openalex(topic: Topic, max_results: int, source: SourceConfig) -> list
     return papers
 
 
+def canonical_arxiv_id(value: str) -> str:
+    match = re.search(
+        r"(?:^|arxiv[.:]|arxiv\.org/(?:abs|pdf)/)(\d{4}\.\d{4,5})(?:v\d+)?(?:$|[?#])",
+        value.strip(),
+        re.IGNORECASE,
+    )
+    return match.group(1) if match else ""
+
+
+def arxiv_id_from_openalex_work(work: dict[str, Any]) -> str:
+    values = [
+        str((work.get("ids") or {}).get("doi") or ""),
+        str(work.get("doi") or ""),
+    ]
+    for location in work.get("locations") or []:
+        values.extend(
+            [
+                str(location.get("landing_page_url") or ""),
+                str(location.get("pdf_url") or ""),
+            ]
+        )
+    for value in values:
+        arxiv_id = canonical_arxiv_id(value)
+        if arxiv_id:
+            return arxiv_id
+    return ""
+
+
+def fetch_arxiv_via_openalex(topic: Topic, max_results: int) -> list[dict[str, Any]]:
+    params = {
+        "search": topic_plain_query(topic),
+        "filter": f"locations.source.id:{OPENALEX_ARXIV_SOURCE_ID}",
+        "per-page": str(max_results),
+        "sort": "publication_date:desc",
+    }
+    mailto = os.getenv("CONTACT_EMAIL") or os.getenv("OPENALEX_EMAIL")
+    if mailto:
+        params["mailto"] = mailto
+    url = f"{OPENALEX_WORKS_URL}?{urllib.parse.urlencode(params)}"
+    data = request_json(url, timeout=float(os.getenv("OPENALEX_TIMEOUT_SECONDS", "60")))
+    papers = []
+    for work in data.get("results", []):
+        arxiv_id = arxiv_id_from_openalex_work(work)
+        candidate = openalex_paper_from_work(work, "arXiv via OpenAlex")
+        if not arxiv_id or not candidate:
+            continue
+        candidate.update(
+            {
+                "id": arxiv_id,
+                "source": "arXiv via OpenAlex",
+                "paper_url": f"https://arxiv.org/abs/{arxiv_id}",
+                "pdf_url": f"https://arxiv.org/pdf/{arxiv_id}",
+                "seed_topic": topic.id,
+            }
+        )
+        papers.append(candidate)
+    return papers
+
+
 def crossref_date(item: dict[str, Any]) -> str:
     for field in ("published-print", "published-online", "published", "created", "issued"):
         date_parts = (item.get(field) or {}).get("date-parts") or []
@@ -1794,7 +1861,9 @@ def call_openai_compatible(prompt: str) -> dict[str, Any]:
     retry_count = max(1, int(os.getenv("LLM_RETRIES", "2")))
     retry_wait = max(0.0, float(os.getenv("LLM_RETRY_WAIT_SECONDS", "20")))
     last_error: Exception | None = None
-    for attempt in range(retry_count):
+    attempt = 0
+    compatibility_retry_used = False
+    while attempt < retry_count:
         req = urllib.request.Request(
             endpoint,
             data=json.dumps(payload).encode("utf-8"),
@@ -1803,7 +1872,7 @@ def call_openai_compatible(prompt: str) -> dict[str, Any]:
         )
         try:
             with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
-                if not stream:
+                if not payload["stream"]:
                     data = json.loads(resp.read().decode("utf-8"))
                     content = data["choices"][0]["message"]["content"]
                 else:
@@ -1825,7 +1894,35 @@ def call_openai_compatible(prompt: str) -> dict[str, Any]:
                     content = "".join(chunks)
                     if not content:
                         raise ValueError("LLM streaming response contained no content")
-            return json.loads(content)
+            normalized_content = content.strip()
+            if normalized_content.startswith("```"):
+                normalized_content = re.sub(r"^```(?:json)?\s*|\s*```$", "", normalized_content, flags=re.IGNORECASE)
+            return json.loads(normalized_content)
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if exc.code == 400 and "response_format" in payload and not compatibility_retry_used:
+                compatibility_retry_used = True
+                payload = dict(payload)
+                payload.pop("response_format", None)
+                payload["stream"] = False
+                print(
+                    "Warning: LLM rejected structured streaming; retrying with compatibility mode",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                continue
+            if attempt == retry_count - 1 or not retryable_llm_error(exc):
+                raise
+            wait_seconds = retry_wait * (attempt + 1)
+            print(
+                f"Warning: transient LLM error ({exc}); retrying in {wait_seconds:.0f}s "
+                f"({attempt + 2}/{retry_count})",
+                file=sys.stderr,
+                flush=True,
+            )
+            if wait_seconds:
+                time.sleep(wait_seconds)
+            attempt += 1
         except Exception as exc:
             last_error = exc
             if attempt == retry_count - 1 or not retryable_llm_error(exc):
@@ -1839,6 +1936,7 @@ def call_openai_compatible(prompt: str) -> dict[str, Any]:
             )
             if wait_seconds:
                 time.sleep(wait_seconds)
+            attempt += 1
     raise RuntimeError(f"LLM request failed: {last_error}")
 
 
@@ -1947,7 +2045,7 @@ def dedupe_papers(papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen = set()
     unique = []
     for paper in papers:
-        key = paper.get("id") or paper.get("paper_url")
+        key = paper_key(paper)
         if key in seen:
             continue
         seen.add(key)
@@ -1956,7 +2054,16 @@ def dedupe_papers(papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def paper_key(paper: dict[str, Any]) -> str:
-    return str(paper.get("id") or paper.get("paper_url") or "")
+    values = [
+        str(paper.get("id") or ""),
+        str(paper.get("paper_url") or ""),
+        str(paper.get("pdf_url") or ""),
+    ]
+    for value in values:
+        arxiv_id = canonical_arxiv_id(value)
+        if arxiv_id:
+            return f"arxiv:{arxiv_id}"
+    return next((value for value in values if value), "")
 
 
 def best_match_level(paper: dict[str, Any]) -> str:
@@ -2236,6 +2343,29 @@ def collect(
                 source_stats[source.name]["failed_fetches"] += 1
                 source_stats[source.name]["last_error"] = str(exc)
                 print(f"Warning: {source.name} request failed for {topic.name}: {exc}", file=sys.stderr)
+                if source.type == "arxiv" and env_flag("ARXIV_OPENALEX_FALLBACK", True):
+                    try:
+                        fallback_papers = fetch_arxiv_via_openalex(topic, max_per_topic)
+                    except Exception as fallback_exc:
+                        source_stats[source.name]["fallback_last_error"] = str(fallback_exc)
+                        print(
+                            f"Warning: OpenAlex arXiv fallback failed for {topic.name}: {fallback_exc}",
+                            file=sys.stderr,
+                        )
+                    else:
+                        all_candidates.extend(fallback_papers)
+                        successful_fetches += 1
+                        source_stats[source.name]["fallback_successful_fetches"] = (
+                            int(source_stats[source.name].get("fallback_successful_fetches") or 0) + 1
+                        )
+                        source_stats[source.name]["fallback_paper_count"] = (
+                            int(source_stats[source.name].get("fallback_paper_count") or 0) + len(fallback_papers)
+                        )
+                        print(
+                            f"Recovered {len(fallback_papers)} arXiv paper(s) via OpenAlex for {topic.name}",
+                            flush=True,
+                        )
+                        continue
                 if source.type == "arxiv" and should_stop_arxiv_fetches(exc):
                     skipped = len(topics) - index - 1
                     failed_fetches += skipped
@@ -2295,8 +2425,11 @@ def collect(
         all_candidates.append(copy.deepcopy(cached_paper))
         cached_conference_candidate_count += 1
 
-    if successful_fetches == 0 and failed_fetches > 0 and (existing_payload.get("papers") or existing_conference_payload.get("papers")):
-        print("All configured sources failed; preserving existing paper data.", file=sys.stderr)
+    if successful_fetches == 0 and failed_fetches > 0:
+        if existing_payload.get("papers") or existing_conference_payload.get("papers"):
+            print("All configured sources failed; preserving existing paper data.", file=sys.stderr)
+        if env_flag("FAIL_ON_ALL_SOURCES_FAILED", True):
+            raise RuntimeError("All configured paper sources failed; refusing to publish stale data")
 
     recent_papers = []
     daily_backfill_candidates = []

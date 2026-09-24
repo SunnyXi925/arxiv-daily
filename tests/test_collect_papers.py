@@ -9,9 +9,11 @@ from unittest import mock
 
 from scripts.collect_papers import (
     ConferenceSource,
+    arxiv_id_from_openalex_work,
     arxiv_query_for_topic,
     arxiv_retry_wait_seconds,
     call_openai_compatible,
+    canonical_arxiv_id,
     cached_conference_years,
     collect,
     collection_cutoff,
@@ -20,6 +22,7 @@ from scripts.collect_papers import (
     default_conference_years,
     enrich_conference_paper_from_arxiv,
     fetch_arxiv,
+    fetch_arxiv_via_openalex,
     find_conference_abstract_by_title,
     is_relevant_enough,
     has_meaningful_summary,
@@ -29,6 +32,7 @@ from scripts.collect_papers import (
     merge_config,
     openalex_abstract_text,
     openalex_paper_from_work,
+    paper_key,
     parse_arxiv_entries,
     parse_conference_sources,
     parse_dblp_html_toc,
@@ -92,6 +96,8 @@ class RetentionTest(unittest.TestCase):
         os.environ.pop("ARXIV_QUERY_MODE", None)
         os.environ.pop("MIN_DAILY_PAPERS", None)
         os.environ.pop("DAILY_BACKFILL_DAYS", None)
+        os.environ.pop("ARXIV_OPENALEX_FALLBACK", None)
+        os.environ.pop("FAIL_ON_ALL_SOURCES_FAILED", None)
 
     def test_arxiv_retry_wait_uses_retry_after_header(self) -> None:
         os.environ["ARXIV_RETRY_MIN_SECONDS"] = "30"
@@ -257,6 +263,48 @@ class RetentionTest(unittest.TestCase):
         self.assertEqual(papers[0]["seed_topic"], "arch")
         self.assertEqual(papers[0]["authors"], ["Ada Example"])
         self.assertEqual(papers[0]["categories"], ["cs.AR"])
+
+    def test_arxiv_openalex_fallback_keeps_arxiv_identity(self) -> None:
+        topic = Topic(
+            id="health_agents",
+            name="Health Agents",
+            description="",
+            keywords=["medical agent"],
+            arxiv_categories=["cs.AI"],
+        )
+        work = {
+            "id": "https://openalex.org/W123",
+            "doi": "https://doi.org/10.48550/arxiv.2609.24453",
+            "ids": {"doi": "https://doi.org/10.48550/arxiv.2609.24453"},
+            "title": "A Medical Agent Study",
+            "publication_date": "2026-09-23",
+            "abstract_inverted_index": {"Medical": [0], "agent": [1], "study": [2]},
+            "authorships": [],
+            "concepts": [],
+            "locations": [
+                {
+                    "landing_page_url": "https://arxiv.org/abs/2609.24453v1",
+                    "pdf_url": "https://arxiv.org/pdf/2609.24453v1",
+                }
+            ],
+        }
+
+        with mock.patch("scripts.collect_papers.request_json", return_value={"results": [work]}) as request_mock:
+            papers = fetch_arxiv_via_openalex(topic, 20)
+
+        self.assertEqual(arxiv_id_from_openalex_work(work), "2609.24453")
+        self.assertEqual(papers[0]["id"], "2609.24453")
+        self.assertEqual(papers[0]["source"], "arXiv via OpenAlex")
+        self.assertEqual(papers[0]["paper_url"], "https://arxiv.org/abs/2609.24453")
+        requested_url = request_mock.call_args.args[0]
+        self.assertIn("locations.source.id%3AS4306400194", requested_url)
+
+    def test_arxiv_versions_share_one_paper_key(self) -> None:
+        self.assertEqual(canonical_arxiv_id("2609.24453v1"), "2609.24453")
+        self.assertEqual(
+            paper_key({"id": "2609.24453v1", "paper_url": "https://arxiv.org/abs/2609.24453v1"}),
+            paper_key({"id": "2609.24453", "paper_url": "https://arxiv.org/abs/2609.24453"}),
+        )
 
     def test_arxiv_query_defaults_to_keyword_search(self) -> None:
         topic = Topic(
@@ -552,6 +600,31 @@ class RetentionTest(unittest.TestCase):
         self.assertEqual(result, {"problem": "recovered"})
         self.assertEqual(urlopen_mock.call_count, 2)
         sleep_mock.assert_not_called()
+
+    def test_openai_compatible_retries_400_without_structured_streaming(self) -> None:
+        os.environ["LLM_API_KEY"] = "test-key"
+        os.environ["LLM_BASE_URL"] = "https://example.test/v1"
+        os.environ["LLM_MODEL"] = "test-model"
+        os.environ["LLM_STREAM"] = "true"
+        os.environ["LLM_RETRIES"] = "1"
+        bad_request = urllib.error.HTTPError("url", 400, "Bad Request", {}, None)
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = json.dumps(
+            {"choices": [{"message": {"content": '```json\n{"problem":"compatible"}\n```'}}]}
+        ).encode("utf-8")
+
+        with mock.patch(
+            "scripts.collect_papers.urllib.request.urlopen",
+            side_effect=[bad_request, response],
+        ) as urlopen_mock:
+            result = call_openai_compatible("paper prompt")
+
+        self.assertEqual(result, {"problem": "compatible"})
+        self.assertEqual(urlopen_mock.call_count, 2)
+        retry_payload = json.loads(urlopen_mock.call_args.args[0].data.decode("utf-8"))
+        self.assertNotIn("response_format", retry_payload)
+        self.assertFalse(retry_payload["stream"])
 
     def test_complete_llm_summary_requires_all_three_value_fields(self) -> None:
         summary = {
@@ -938,6 +1011,112 @@ class RetentionTest(unittest.TestCase):
         self.assertEqual(payload["stats"]["daily_candidate_paper_count"], 1)
         self.assertEqual(payload["stats"]["daily_backfill_added_count"], 1)
         self.assertTrue(payload["papers"][0]["backfilled_from_recent_arxiv"])
+
+    def test_collect_uses_openalex_fallback_when_arxiv_rejects_request(self) -> None:
+        now = dt.datetime.now(dt.timezone.utc)
+        config = {
+            "sources": [{"type": "arxiv", "name": "arXiv"}],
+            "conference_sources": {"enabled": False},
+            "topics": [
+                {
+                    "id": "health_agents",
+                    "name": "Health Agents",
+                    "description": "medical agents for patient care",
+                    "keywords": ["medical agent", "clinical patient"],
+                    "arxiv_categories": ["cs.AI"],
+                }
+            ],
+        }
+        fetched_paper = {
+            "id": "2609.24453",
+            "source": "arXiv via OpenAlex",
+            "title": "A Medical Agent for Clinical Patient Care",
+            "authors": ["Ada Example"],
+            "summary": "This medical agent supports clinical patient care and health decisions. " * 3,
+            "published": now.isoformat(),
+            "updated": "",
+            "paper_url": "https://arxiv.org/abs/2609.24453",
+            "pdf_url": "https://arxiv.org/pdf/2609.24453",
+            "categories": ["cs.AI"],
+        }
+        rejected = urllib.error.HTTPError("url", 406, "Not Acceptable", {}, None)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_path = tmp_path / "interests.json"
+            output_path = tmp_path / "papers.json"
+            conference_output_path = tmp_path / "conference.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            with (
+                mock.patch("scripts.collect_papers.fetch_source_topic", side_effect=rejected),
+                mock.patch("scripts.collect_papers.fetch_arxiv_via_openalex", return_value=[fetched_paper]),
+                mock.patch("scripts.collect_papers.time.sleep"),
+            ):
+                payload = collect(
+                    config_path,
+                    output_path,
+                    conference_output_path,
+                    days=8,
+                    max_per_topic=20,
+                    max_summaries=0,
+                    max_new_papers=10,
+                    max_stored_papers=10,
+                    max_new_conference_papers=10,
+                    max_stored_conference_papers=10,
+                    max_data_bytes=0,
+                    incremental_since_last_run=False,
+                    recent_history_days=45,
+                    clear_cache=True,
+                )
+
+        self.assertEqual(payload["stats"]["new_paper_count"], 1)
+        self.assertEqual(payload["stats"]["successful_fetches"], 1)
+        self.assertEqual(payload["stats"]["failed_fetches"], 1)
+        self.assertEqual(payload["stats"]["source_stats"]["arXiv"]["fallback_successful_fetches"], 1)
+
+    def test_collect_can_fail_when_every_source_fails(self) -> None:
+        config = {
+            "sources": [{"type": "arxiv", "name": "arXiv"}],
+            "conference_sources": {"enabled": False},
+            "topics": [
+                {
+                    "id": "health_agents",
+                    "name": "Health Agents",
+                    "description": "medical agents",
+                    "keywords": ["medical agent"],
+                    "arxiv_categories": ["cs.AI"],
+                }
+            ],
+        }
+        os.environ["ARXIV_OPENALEX_FALLBACK"] = "false"
+        os.environ["FAIL_ON_ALL_SOURCES_FAILED"] = "true"
+        rejected = urllib.error.HTTPError("url", 406, "Not Acceptable", {}, None)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_path = tmp_path / "interests.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            with (
+                mock.patch("scripts.collect_papers.fetch_source_topic", side_effect=rejected),
+                mock.patch("scripts.collect_papers.time.sleep"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "All configured paper sources failed"):
+                    collect(
+                        config_path,
+                        tmp_path / "papers.json",
+                        tmp_path / "conference.json",
+                        days=8,
+                        max_per_topic=20,
+                        max_summaries=0,
+                        max_new_papers=10,
+                        max_stored_papers=10,
+                        max_new_conference_papers=10,
+                        max_stored_conference_papers=10,
+                        max_data_bytes=0,
+                        incremental_since_last_run=False,
+                        recent_history_days=45,
+                        clear_cache=True,
+                    )
 
     def test_collect_requeues_cached_incomplete_llm_summary(self) -> None:
         now = dt.datetime.now(dt.timezone.utc)
